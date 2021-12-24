@@ -10,9 +10,10 @@ import shutil
 import argparse
 import configparser
 from predictionModel.ASTGCN_r import make_model
-from metric.utils import load_graphdata_channel, get_road_adj, compute_val_loss_mstgcn, predict_and_save_results_mstgcn
+from metric.utils import compute_val_loss_mstgcn, predict_and_save_results_mstgcn
+from prepareData import load_graphdata_channel, get_road_adj
 from tensorboardX import SummaryWriter
-from metric.metrics import masked_mae, masked_mse
+from metric.metrics import masked_mse
 
 
 parser = argparse.ArgumentParser()
@@ -85,7 +86,7 @@ def train_main():
         os.makedirs(params_path)
         print('create params directory %s' % (params_path))
     elif (start_epoch == 0) and (os.path.exists(params_path)):
-        shutil.rmtree(params_path) 
+        shutil.rmtree(params_path)
         os.makedirs(params_path)
         print('delete the old one and create params directory %s' % (params_path))
     elif (start_epoch > 0) and (os.path.exists(params_path)):
@@ -106,19 +107,19 @@ def train_main():
     print('epochs\t', epochs)
     masked_flag = 0
     criterion = nn.L1Loss().to(DEVICE)
-    criterion_masked = masked_mae
+    criterion_masked = masked_mse
     if loss_function == 'masked_mse':
         criterion_masked = masked_mse  # nn.MSELoss().to(DEVICE)
         masked_flag = 1
-    elif loss_function == 'masked_mae':
-        criterion_masked = masked_mae
-        masked_flag = 1
-    elif loss_function == 'mae':
-        criterion = nn.L1Loss().to(DEVICE)
-        masked_flag = 0
-    elif loss_function == 'rmse':
-        criterion = nn.MSELoss().to(DEVICE)
-        masked_flag = 0
+    # elif loss_function == 'masked_mae':
+    #     criterion_masked = masked_mae
+    #     masked_flag = 1
+    # elif loss_function == 'mae':
+    #     criterion = nn.L1Loss().to(DEVICE)
+    #     masked_flag = 0
+    # elif loss_function == 'rmse':
+    #     criterion = nn.MSELoss().to(DEVICE)
+    #     masked_flag = 0
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
     sw = SummaryWriter(logdir=params_path, flush_secs=5)
     print(net)
@@ -171,6 +172,8 @@ def train_main():
 
         net.train()  # ensure dropout layers are in train mode
 
+        type = 'train'
+
         for batch_index, batch_data in enumerate(train_loader):
 
             encoder_inputs, labels = batch_data
@@ -181,7 +184,7 @@ def train_main():
 
             if masked_flag:
                 loss = criterion_masked(
-                    outputs, labels, mask_matrix, missing_value)
+                    outputs, labels, mask_matrix, type, missing_value)
             else:
                 loss = criterion(outputs, labels)
 
@@ -203,7 +206,8 @@ def train_main():
     print('best epoch:', best_epoch)
 
     # apply the best model on the test set
-    predict_main(best_epoch, test_loader, test_target_tensor,metric_method, _mean, _std, mask_matrix, 'test')
+    predict_main(best_epoch, test_loader, test_target_tensor,
+                 metric_method, _mean, _std, mask_matrix, 'test')
 
 
 def predict_main(global_step, data_loader, data_target_tensor, metric_method, _mean, _std, mask_matrix, type):
@@ -232,5 +236,5 @@ if __name__ == "__main__":
 
     train_main()
 
-    # predict_main(39, test_loader, test_target_tensor,
+    # predict_main(33, test_loader, test_target_tensor,
     #              metric_method, _mean, _std, mask_matrix, 'test')

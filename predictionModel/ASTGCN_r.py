@@ -270,7 +270,7 @@ class ASTGCN_submodule(nn.Module):
                               1, cheb_polynomials, num_of_vertices, len_input//time_strides) for _ in range(nb_block-1)])
 
         self.final_conv = nn.Conv2d(
-            int(len_input/time_strides), num_for_predict, kernel_size=(1, nb_time_filter-3))
+            int(len_input/time_strides), num_for_predict, kernel_size=(1, nb_time_filter-10))
 
         self.DEVICE = DEVICE
 

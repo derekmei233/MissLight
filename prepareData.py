@@ -4,6 +4,7 @@ import random
 import argparse
 import configparser
 import os
+import torch
 
 
 def normalization(train, val, test):
@@ -22,13 +23,13 @@ def normalization(train, val, test):
     assert train.shape[1:] == val.shape[1:] and val.shape[1:] == test.shape[1:]
     mean = train.mean(axis=(0, 1, 3), keepdims=True)
     std = train.std(axis=(0, 1, 3), keepdims=True)
-    # mean = train.mean(axis=0, keepdims=True)
-    # std = train.std(axis=0, keepdims=True)
+    
     print('mean.shape:', mean.shape)
     print('std.shape:', std.shape)
 
     def normalize(x):
-        return (x - mean) / std
+        return np.nan_to_num((x - mean) / std)
+        # return (x - mean) / std
 
     train_norm = normalize(train)
     val_norm = normalize(val)
@@ -36,6 +37,188 @@ def normalization(train, val, test):
 
     return {'_mean': mean, '_std': std}, train_norm, val_norm, test_norm
 
+def get_world_shape(world):
+    length = len(world.intersection_ids)
+    data = world.intersection_ids[length-1].split("_")
+    shape = []
+    shape.append(int(data[2]))
+    shape.append(int(data[1]))
+    return shape
+
+def build_relation_intersection_road(world, save_dir):
+    '''
+    build the relation between intersections and roads.
+    For each intersection,it has in_roads,out_roads.
+    '''
+    net_shape = get_world_shape(world)
+    intersections = world.intersections
+    roads = world.roadnet['roads']
+    inter_dict_id2inter = {}
+    inter_dict_inter2id = {}
+    road_dict_id2road = {}
+    road_dict_road2id = {}
+    inter_in_roads = {}
+    inter_out_roads = {}
+    road_links = {}
+    inter_nb_num = {}
+    neighbor_num = {}
+
+    # create mapping of roads
+    for idx, road_dic in enumerate(roads):
+        road_dict_id2road[idx] = road_dic['id']
+        road_dict_road2id[road_dic['id']] = idx
+
+    # create mapping of inter and its roads
+    for idx, inter_dic in enumerate(intersections):
+        inter_dict_id2inter[idx] = inter_dic.id
+        inter_dict_inter2id[inter_dic.id] = idx
+        inter_in_roads[inter_dic.id] = [road['id']
+                                        for road in inter_dic.in_roads]
+        inter_out_roads[inter_dic.id] = [road['id']
+                                         for road in inter_dic.out_roads]
+        road_links[inter_dic.id] = inter_dic.roadlinks
+
+        inter_nb_num[inter_dic.id] = []
+        for in_road_dic in inter_dic.in_roads:
+            inter_nb_num[inter_dic.id].append(in_road_dic['startIntersection'])
+
+    for inter_dic in inter_nb_num:
+        num = 0
+        for neighbor in inter_nb_num[inter_dic]:
+            if neighbor in inter_dict_inter2id:
+                num += 1
+        if num not in neighbor_num:
+            neighbor_num[num] = []
+        neighbor_num[num].append(inter_dict_inter2id[inter_dic])
+
+    net_info = {'inter_dict_id2inter': inter_dict_id2inter, 'inter_dict_inter2id': inter_dict_inter2id,
+                'road_dict_id2road': road_dict_id2road, 'road_dict_road2id': road_dict_road2id,
+                'inter_in_roads': inter_in_roads, 'inter_out_roads': inter_out_roads,
+                'road_links': road_links, 'neighbor_num': neighbor_num, 'net_shape': net_shape}
+    with open(save_dir, 'wb') as fo:
+        pickle.dump(net_info, fo)
+
+    print("save relation done")
+
+def load_graphdata_channel(graph_signal_matrix_filename, num_of_hours, num_of_days, num_of_weeks, DEVICE, batch_size, shuffle=True):
+    '''
+    这个是为PEMS的数据准备的函数
+    将x,y都处理成归一化到[-1,1]之前的数据;
+    每个样本同时包含所有监测点的数据，所以本函数构造的数据输入时空序列预测模型；
+    该函数会把hour, day, week的时间串起来；
+    注: 从文件读入的数据，x是最大最小归一化的，但是y是真实值
+    这个函数转为mstgcn，astgcn设计，返回的数据x都是通过减均值除方差进行归一化的，y都是真实值
+    :param graph_signal_matrix_filename: str, graph_signal_matrix_filename = ./roadgraph/hz/state_4x4.pkl
+    :param num_of_hours: int
+    :param num_of_days: int
+    :param num_of_weeks: int
+    :param DEVICE:
+    :param batch_size: int
+    :return:
+    three DataLoaders, each dataloader contains:
+    test_x_tensor: (B, N_nodes, in_feature, T_input)
+    test_decoder_input_tensor: (B, N_nodes, T_output)
+    test_target_tensor: (B, N_nodes, T_output)
+
+    '''
+
+    file = os.path.basename(graph_signal_matrix_filename).split('.')[0]
+
+    dirpath = os.path.dirname(graph_signal_matrix_filename)
+
+    filename = os.path.join(dirpath,
+                            file + '_r' + str(num_of_hours) + '_d' + str(num_of_days) + '_w' + str(num_of_weeks)) + '_astcgn'
+
+    print('load file:', filename)
+    pkl_file = open(filename, 'rb')
+    file_data = pickle.load(pkl_file)
+
+    # mask:0 means random feature
+    mask_matrix = file_data['node_update']
+    train_x = file_data['train_x']  # (72, 80, 3, 30)
+    # train_x = train_x[:, :, 0:1, :]
+    train_target = file_data['train_target']  # (72, 80, 3,30)
+
+    val_x = file_data['val_x']
+    # val_x = val_x[:, :, 0:1, :]
+    val_target = file_data['val_target']
+
+    test_x = file_data['test_x']
+    # test_x = test_x[:, :, 0:1, :]
+    test_target = file_data['test_target']
+
+    # mean = file_data['mean'][:, :, 0:1, :]  # (1, 1, 3, 1)
+    # std = file_data['std'][:, :, 0:1, :]  # (1, 1, 3, 1)
+    mean = file_data['mean']  # (1, 1, 3, 1)
+    std = file_data['std']  # (1, 1, 3, 1)
+
+    # ------- train_loader -------
+    train_x_tensor = torch.from_numpy(train_x).type(
+        torch.FloatTensor).to(DEVICE)  # (B, N, F, T)
+    train_target_tensor = torch.from_numpy(train_target).type(
+        torch.FloatTensor).to(DEVICE)  # (B, N, F, T)
+
+    train_dataset = torch.utils.data.TensorDataset(
+        train_x_tensor, train_target_tensor)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=shuffle)
+
+    # ------- val_loader -------
+    val_x_tensor = torch.from_numpy(val_x).type(
+        torch.FloatTensor).to(DEVICE)  # (B, N, F, T)
+    val_target_tensor = torch.from_numpy(val_target).type(
+        torch.FloatTensor).to(DEVICE)  # (B, N, F, T)
+
+    val_dataset = torch.utils.data.TensorDataset(
+        val_x_tensor, val_target_tensor)
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False)
+
+    # ------- test_loader -------
+    test_x_tensor = torch.from_numpy(test_x).type(
+        torch.FloatTensor).to(DEVICE)  # (B, N, F, T)
+    test_target_tensor = torch.from_numpy(test_target).type(
+        torch.FloatTensor).to(DEVICE)  # (B, N, F, T)
+
+    test_dataset = torch.utils.data.TensorDataset(
+        test_x_tensor, test_target_tensor)
+
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False)
+
+    # print
+    print('train:', train_x_tensor.size(), train_target_tensor.size())
+    print('val:', val_x_tensor.size(), val_target_tensor.size())
+    print('test:', test_x_tensor.size(), test_target_tensor.size())
+
+    return train_loader, train_target_tensor, val_loader, val_target_tensor, test_loader, test_target_tensor, mean, std, mask_matrix
+
+def get_road_adj(filename):
+    with open(filename, 'rb') as fo:
+        result = pickle.load(fo)
+    road_info = result['road_links']
+    road_dict_road2id = result['road_dict_road2id']
+    num_roads = len(result['road_dict_id2road'])
+    adjacency_matrix = np.zeros(
+        (int(num_roads), int(num_roads)), dtype=np.float32)
+
+    for inter_dic in road_info:
+        for link_dic in road_info[inter_dic]:
+            source = link_dic[0]
+            target = link_dic[1]
+            adjacency_matrix[road_dict_road2id[source]
+                             ][road_dict_road2id[target]] = 1
+
+    return adjacency_matrix
+
+def phase_to_onehot(phase, num_class):
+    assert num_class > phase.max()
+    one_hot = np.zeros((1, num_class))
+    one_hot[-1][phase.reshape(-1)] = 1.
+    # one_hot = one_hot.reshape(*phase.shape, num_class)
+    return one_hot
 
 def build_road_state(relation_file, state_file, neighbor_node, mask_num, save_dir):
     with open(relation_file, 'rb') as f_re:
@@ -56,66 +239,60 @@ def build_road_state(relation_file, state_file, neighbor_node, mask_num, save_di
     # only update 64 road_node,
     # It has 16 roads'states which start_intersection is virtual are not known.
 
-    # add phase:road_feature(,,4) or no phase:road_feature(,,3)
-    road_feature = np.zeros((len(state), int(num_roads), 4), dtype=np.float32)
+    # add phase:road_feature(,,11) or no phase:road_feature(,,3)
+    road_feature = np.zeros((len(state), int(num_roads), 11), dtype=np.float32)
+    # road_update:0:roads related to virtual inter,1:unmasked,2:masked
     road_update = np.zeros(int(num_roads), dtype=np.int32)
 
     for id_time, step_dict in enumerate(state):
         for id_node, node_dict in enumerate(step_dict):
             if id_node in mask_inter:
-                continue
-            obs = node_dict[0][0]
-            phase = node_dict[1][0]
-            direction = []
-            if obs.shape[-1] == 12:
-
-                '''
-                3 dims:left,straight,right
-                list order:N,E,S,W
-                N = obs[0:3]
-                E = obs[3:6]
-                S = obs[7:10]
-                W = obs[10:13]
-                '''
-
-                direction.append(np.concatenate([obs[0:3],phase]))
-                direction.append(np.concatenate([obs[3:6],phase]))
-                direction.append(np.concatenate([obs[6:9],phase]))
-                direction.append(np.concatenate([obs[9:],phase]))
-            inter = inter_dict_id2inter[id_node]
-
-            # the order of in_roads are the same as list order
-            in_roads = inter_in_roads[inter]
-            for id_road, road in enumerate(in_roads):
-                road_id = road_dict_road2id[road]
-                road_feature[id_time][road_id] = direction[id_road]
                 if id_time == 0:
-                    road_update[road_id] = 1
-        for update in road_update:
+                    in_roads = inter_in_roads[inter_dict_id2inter[id_node]]
+                    for id_road, road in enumerate(in_roads):
+                        road_id = road_dict_road2id[road]
+                        road_update[road_id] = 2
+            else:
+                obs = node_dict[0][0]
+                phase = phase_to_onehot(node_dict[1],8)[0]
+                direction = []
+                if obs.shape[-1] == 12:
+
+                    '''
+                    3 dims:left,straight,right
+                    list order:N,E,S,W
+                    N = obs[0:3]
+                    E = obs[3:6]
+                    S = obs[7:10]
+                    W = obs[10:13]
+                    '''
+
+                    direction.append(np.concatenate([obs[0:3],phase]))
+                    direction.append(np.concatenate([obs[3:6],phase]))
+                    direction.append(np.concatenate([obs[6:9],phase]))
+                    direction.append(np.concatenate([obs[9:],phase]))
+                inter = inter_dict_id2inter[id_node]
+
+                # the order of in_roads are the same as list order
+                in_roads = inter_in_roads[inter]
+                for id_road, road in enumerate(in_roads):
+                    road_id = road_dict_road2id[road]
+                    road_feature[id_time][road_id] = direction[id_road]
+                    if id_time == 0:
+                        road_update[road_id] = 1
+        for update_id,update in enumerate(road_update):
             # unknow road_node
-            if update == 0:
-                rand = 0
-                while rand == 0:
-                    rand = random.randint(0, num_roads-1)
-                road_feature[id_time][update] = road_feature[id_time][rand]
+            if update != 1:
+                rand_id = random.randint(0, num_roads-1)
+                while road_update[rand_id] == 1:
+                    rand_id = random.randint(0, num_roads-1)
+                road_feature[id_time][update_id] = road_feature[id_time][rand_id]
 
     road_info = {'road_feature': road_feature, 'road_update': road_update}
     with open(save_dir, 'wb') as fw:
         pickle.dump(road_info, fw)
     print("save road_node_info done")
 
-
-# def get_mask_inter(net_shape, neighbor_node, mask_num, neighbor_num):
-#     '''generate masked intersections and its id
-#     params:
-#     net_shape: shape of road network,eg:(4,4),(1,5)...
-#     neighbor_node: mask nodes which neighbors' num is neighbor_node
-#     mask_num: the total num of mask nodes
-#     neighbor_num: record the neighbors' num of each node 
-#     '''
-
-#     mask_id = random.sample(neighbor_num[int(neighbor_node)],int(mask_num))
-#     return mask_id
 
 def search_data(sequence_length, num_of_depend, label_start_idx,
                 num_for_predict, units, points_per_hour):
@@ -235,8 +412,8 @@ def read_and_generate_dataset(graph_signal_matrix_filename,
                                     points_per_hour)
         if ((sample[0] is None) and (sample[1] is None) and (sample[2] is None)):
             continue
-        # hour_sample(30,80,4)
-        # target(30,80,4)
+        # hour_sample(30,80,11)
+        # target(30,80,11)
         week_sample, day_sample, hour_sample, target = sample
 
         # [(week_sample),(day_sample),(hour_sample),target,time_sample]
@@ -378,9 +555,9 @@ if __name__ == "__main__":
     relation_filename = data_config['relation_filename']
     neighbor_node = data_config['neighbor_node']
     mask_num = data_config['mask_num']
-
+    state_file = data_config['state_file']
     # read state of intersections,convert it into state which road graph needed,save.
-    state_file = "./roadgraph/hz/rawstate_4x4.pkl"
+    # state_file = "./roadgraph/hz/rawstate_4x4.pkl"
     build_road_state(relation_filename, state_file, neighbor_node, mask_num,
                      save_dir=graph_signal_matrix_filename)
 

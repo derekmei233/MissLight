@@ -10,12 +10,12 @@ import numpy as np
 import logging
 from datetime import datetime
 import pickle
-from metric.utils import build_relation_intersection_road
+from prepareData import build_relation_intersection_road
 
 # parse args
 parser = argparse.ArgumentParser(description='Run Example')
 parser.add_argument('--config_file', type=str,
-                    default='cityflow.cfg', help='path of config file')
+                    default='cityflow_hz_4x4.cfg', help='path of config file')
 parser.add_argument('--thread', type=int, default=1, help='number of threads')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
 parser.add_argument('--action_interval', type=int, default=20,
@@ -167,11 +167,8 @@ def test():
 
 
 if __name__ == '__main__':
-    # simulate
-    # import os
-    # os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
-
     # create the relation between intersections and roads,only need to run one time
-    # build_relation_intersection_road(world, relation_name)
-    # train(args, env)
-    test()
+    build_relation_intersection_road(world, relation_name)
+    
+    train(args, env)
+    # test()
