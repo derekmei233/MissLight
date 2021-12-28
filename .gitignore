@@ -9,3 +9,5 @@ local/
 experiments/
 roadgraph/
 data/frontend/
+venv/
+data/replay_dir/
