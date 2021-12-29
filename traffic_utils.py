@@ -16,6 +16,26 @@ def augment_traffic(path, seed, max_interval, interval):
     json.dump(df, contents)
 
 
+def convert_traffic(path, seed, fluc):
+    f = open(path, 'rb')
+    random.seed(seed)
+    contents = json.load(f)
+    index = []
+    for i in contents:
+        shift = random.randint(-fluc, fluc)
+        index.append([i['interval'],max(0, i['startTime'] + shift),
+                      max(0, i['endTime'] + shift)])
+    random.shuffle(index)
+    for idx, j in enumerate(contents):
+        j['interval'] = index[idx][0]
+        j['startTime'] = index[idx][1]
+        j['endTime'] = index[idx][2]
+    df = path[:-5] + f'seed{seed}fluc{fluc}.json'
+    df = open(df, 'w')
+    json.dump(contents, df)
+    return contents
+
+
 def static_traffic(path):
     f = open(path, 'rb')
     contents = json.load(f)
@@ -24,4 +44,5 @@ def static_traffic(path):
         intv = i['endTime'] - i['startTime']
         count = int(intv / i['interval']) + 1
         traffic += count
+    print(traffic)
     return traffic
