@@ -147,7 +147,7 @@ def test():
     save_state = []
     obs = env.reset()
     for agent in agents:
-        agent.load_model(args.save_dir, 0)
+        agent.load_model(args.save_dir,0)
     for i in range(args.steps):
         if i % args.action_interval == 0:
             actions = []
@@ -169,6 +169,6 @@ def test():
 if __name__ == '__main__':
     # create the relation between intersections and roads,only need to run one time
     build_relation_intersection_road(world, relation_name)
-    
-    train(args, env)
-    # test()
+    if not args.load_model:
+        train(args, env)
+    test()
