@@ -107,13 +107,20 @@ class Temporal_Attention_layer(nn.Module):
     def __init__(self, DEVICE, in_channels, num_of_vertices, num_of_timesteps):
         super(Temporal_Attention_layer, self).__init__()
         self.U1 = nn.Parameter(torch.FloatTensor(num_of_vertices).to(DEVICE))
-        self.U2 = nn.Parameter(torch.FloatTensor(
-            in_channels, num_of_vertices).to(DEVICE))
+        self.U2 = nn.Parameter(torch.FloatTensor(in_channels, num_of_vertices).to(DEVICE))
         self.U3 = nn.Parameter(torch.FloatTensor(in_channels).to(DEVICE))
-        self.be = nn.Parameter(torch.FloatTensor(
-            1, num_of_timesteps, num_of_timesteps).to(DEVICE))
-        self.Ve = nn.Parameter(torch.FloatTensor(
-            num_of_timesteps, num_of_timesteps).to(DEVICE))
+        self.be = nn.Parameter(torch.FloatTensor(1, num_of_timesteps, num_of_timesteps).to(DEVICE))
+        self.Ve = nn.Parameter(torch.FloatTensor(num_of_timesteps, num_of_timesteps).to(DEVICE))
+        # self.T1 = nn.Parameter(torch.FloatTensor(num_of_timesteps,num_for_predict).to(DEVICE))
+        # self.T2 = nn.Parameter(torch.FloatTensor(in_channels,3).to(DEVICE))
+        # self.U1 = nn.Parameter(torch.FloatTensor(num_of_vertices).to(DEVICE))
+        # self.U2 = nn.Parameter(torch.FloatTensor(
+        #     3, num_of_vertices).to(DEVICE))
+        # self.U3 = nn.Parameter(torch.FloatTensor(3).to(DEVICE))
+        # self.be = nn.Parameter(torch.FloatTensor(
+        #     1, num_for_predict, num_for_predict).to(DEVICE))
+        # self.Ve = nn.Parameter(torch.FloatTensor(
+        #     num_for_predict, num_for_predict).to(DEVICE))
 
     def forward(self, x):
         '''
@@ -122,8 +129,7 @@ class Temporal_Attention_layer(nn.Module):
         '''
         _, num_of_vertices, num_of_features, num_of_timesteps = x.shape
 
-        lhs = torch.matmul(torch.matmul(
-            x.permute(0, 3, 2, 1), self.U1), self.U2)
+        lhs = torch.matmul(torch.matmul(x.permute(0, 3, 2, 1), self.U1), self.U2)
         # x:(B, N, F_in, T) -> (B, T, F_in, N)
         # (B, T, F_in, N)(N) -> (B,T,F_in)
         # (B,T,F_in)(F_in,N)->(B,T,N)
@@ -132,12 +138,40 @@ class Temporal_Attention_layer(nn.Module):
 
         product = torch.matmul(lhs, rhs)  # (B,T,N)(B,N,T)->(B,T,T)
 
-        E = torch.matmul(self.Ve, torch.sigmoid(
-            product + self.be))  # (B, T, T)
+        E = torch.matmul(self.Ve, torch.sigmoid(product + self.be))  # (B, T, T)
 
         E_normalized = F.softmax(E, dim=1)
 
         return E_normalized
+        # '''
+        # :param x: (batch_size, N, F_in, T_in)
+        # :return: (B,T_out,T_out)
+        # '''
+        # _, num_of_vertices, num_of_features, num_of_timesteps = x.shape
+
+        # x_ = torch.matmul(torch.matmul(x,self.T1).permute(0, 1, 3, 2),self.T2)
+        # #x_:(B,N,F_in,T_in)(T_in,T_out)->(B,N,F_in,T_out)
+        # # (B,N,F_in,T_out)->(B,N,T_out,F_in)
+        # # (B,N,T_out,F_in)(F_in,F_out)->(B,N,T_out,F_out)
+
+        # lhs = torch.matmul(torch.matmul(
+        #     x_.permute(0, 2, 3, 1), self.U1), self.U2)
+        # # x_:(B,N,T_out,F_out) -> (B, T_out, F_out, N)
+        # # (B, T_out, F_out, N)(N) -> (B,T_out, F_out)
+        # # (B,T_out, F_out)(F_out,N)->(B,T_out,N)
+
+        # rhs = torch.matmul(self.U3, x_.permute(0,1,3,2))
+        # # x_:(B,N,T_out,F_out) -> (B, N, F_out, T_out)
+        # # (F_out)(B,N,F_out,T_out)->(B, N, T_out)  
+
+        # product = torch.matmul(lhs, rhs)  # (B,T_out,N)(B, N, T_out)->(B,T_out,T_out)
+
+        # E = torch.matmul(self.Ve, torch.sigmoid(
+        #     product + self.be))  # (B, T_out, T_out)
+
+        # E_normalized = F.softmax(E, dim=1)
+
+        # return E_normalized
 
 
 class cheb_conv(nn.Module):
@@ -196,8 +230,9 @@ class cheb_conv(nn.Module):
 
 class ASTGCN_block(nn.Module):
 
-    def __init__(self, DEVICE, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, cheb_polynomials, num_of_vertices, num_of_timesteps):
+    def __init__(self, DEVICE, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, cheb_polynomials, num_of_vertices, num_of_timesteps, num_for_predict):
         super(ASTGCN_block, self).__init__()
+        # self.num_for_predict = num_for_predict
         self.TAt = Temporal_Attention_layer(
             DEVICE, in_channels, num_of_vertices, num_of_timesteps)
         self.SAt = Spatial_Attention_layer(
@@ -215,7 +250,7 @@ class ASTGCN_block(nn.Module):
         :param x: (batch_size, N, F_in, T)
         :return: (batch_size, N, nb_time_filter, T)
         '''
-        # x.shape(27,80,4,30)
+        # x.shape(b,80,11,30)
         batch_size, num_of_vertices, num_of_features, num_of_timesteps = x.shape
 
         # TAt
@@ -264,13 +299,14 @@ class ASTGCN_submodule(nn.Module):
         super(ASTGCN_submodule, self).__init__()
 
         self.BlockList = nn.ModuleList([ASTGCN_block(DEVICE, in_channels, K, nb_chev_filter,
-                                       nb_time_filter, time_strides, cheb_polynomials, num_of_vertices, len_input)])
+                                       nb_time_filter, time_strides, cheb_polynomials, num_of_vertices, len_input, num_for_predict)])
 
         self.BlockList.extend([ASTGCN_block(DEVICE, nb_time_filter, K, nb_chev_filter, nb_time_filter,
-                              1, cheb_polynomials, num_of_vertices, len_input//time_strides) for _ in range(nb_block-1)])
-
+                              1, cheb_polynomials, num_of_vertices, len_input//time_strides, num_for_predict) for _ in range(nb_block-1)])
+        # self.T1 = nn.Parameter(torch.FloatTensor(len_input//time_strides,num_for_predict).to(DEVICE))
+        # self.T2 = nn.Parameter(torch.FloatTensor(in_channels,3).to(DEVICE))
         self.final_conv = nn.Conv2d(
-            int(len_input/time_strides), num_for_predict, kernel_size=(1, nb_time_filter-10))
+            int(len_input/time_strides), num_for_predict, kernel_size=(1, nb_time_filter-2))
 
         self.DEVICE = DEVICE
 
@@ -283,7 +319,11 @@ class ASTGCN_submodule(nn.Module):
         '''
         for block in self.BlockList:
             x = block(x)
-        # x.permute(0, 3, 1, 2):(24,30,80,64)
+        
+        # # (B32,N80,F64,T30)(30,3)->
+        # x = torch.matmul(x,self.T1)
+
+        # x:(B,N80,F64,T30)->(B,T30,N80,F64)
         output = self.final_conv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
         # (b,N,F,T)->(b,T,N,F)-conv<1,F>->(b,c_out*T,N,F)->(b,N,F,T)
 

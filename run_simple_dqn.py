@@ -170,5 +170,5 @@ if __name__ == '__main__':
     # create the relation between intersections and roads,only need to run one time
     build_relation_intersection_road(world, relation_name)
     
-    train(args, env)
-    # test()
+    # train(args, env)
+    test()

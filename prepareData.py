@@ -23,7 +23,7 @@ def normalization(train, val, test):
     assert train.shape[1:] == val.shape[1:] and val.shape[1:] == test.shape[1:]
     mean = train.mean(axis=(0, 1, 3), keepdims=True)
     std = train.std(axis=(0, 1, 3), keepdims=True)
-    
+
     print('mean.shape:', mean.shape)
     print('std.shape:', std.shape)
 
@@ -37,6 +37,7 @@ def normalization(train, val, test):
 
     return {'_mean': mean, '_std': std}, train_norm, val_norm, test_norm
 
+
 def get_world_shape(world):
     length = len(world.intersection_ids)
     data = world.intersection_ids[length-1].split("_")
@@ -44,6 +45,7 @@ def get_world_shape(world):
     shape.append(int(data[2]))
     shape.append(int(data[1]))
     return shape
+
 
 def build_relation_intersection_road(world, save_dir):
     '''
@@ -100,6 +102,7 @@ def build_relation_intersection_road(world, save_dir):
 
     print("save relation done")
 
+
 def load_graphdata_channel(graph_signal_matrix_filename, num_of_hours, num_of_days, num_of_weeks, DEVICE, batch_size, shuffle=True):
     '''
     这个是为PEMS的数据准备的函数
@@ -122,15 +125,15 @@ def load_graphdata_channel(graph_signal_matrix_filename, num_of_hours, num_of_da
 
     '''
 
-    file = os.path.basename(graph_signal_matrix_filename).split('.')[0]
+    # file = os.path.basename(graph_signal_matrix_filename).split('.')[0]
 
-    dirpath = os.path.dirname(graph_signal_matrix_filename)
+    # dirpath = os.path.dirname(graph_signal_matrix_filename)
 
-    filename = os.path.join(dirpath,
-                            file + '_r' + str(num_of_hours) + '_d' + str(num_of_days) + '_w' + str(num_of_weeks)) + '_astcgn'
+    # filename = os.path.join(dirpath,
+    #                         file + '_r' + str(num_of_hours) + '_d' + str(num_of_days) + '_w' + str(num_of_weeks)) + '_astcgn'
 
-    print('load file:', filename)
-    pkl_file = open(filename, 'rb')
+    print('load file:', graph_signal_matrix_filename)
+    pkl_file = open(graph_signal_matrix_filename, 'rb')
     file_data = pickle.load(pkl_file)
 
     # mask:0 means random feature
@@ -195,6 +198,7 @@ def load_graphdata_channel(graph_signal_matrix_filename, num_of_hours, num_of_da
 
     return train_loader, train_target_tensor, val_loader, val_target_tensor, test_loader, test_target_tensor, mean, std, mask_matrix
 
+
 def get_road_adj(filename):
     with open(filename, 'rb') as fo:
         result = pickle.load(fo)
@@ -213,6 +217,7 @@ def get_road_adj(filename):
 
     return adjacency_matrix
 
+
 def phase_to_onehot(phase, num_class):
     assert num_class > phase.max()
     one_hot = np.zeros((1, num_class))
@@ -220,82 +225,85 @@ def phase_to_onehot(phase, num_class):
     # one_hot = one_hot.reshape(*phase.shape, num_class)
     return one_hot
 
+
 def build_road_state(relation_file, state_file, neighbor_node, mask_num, save_dir):
     with open(relation_file, 'rb') as f_re:
         relation = pickle.load(f_re)
-
-    with open(state_file, "rb") as f_ob:
-        state = pickle.load(f_ob)
-
     inter_dict_id2inter = relation['inter_dict_id2inter']
     inter_in_roads = relation['inter_in_roads']
     road_dict_road2id = relation['road_dict_road2id']
     num_roads = len(road_dict_road2id)
     net_shape = relation['net_shape']
     neighbor_num = relation['neighbor_num']
+    mask_inter = random.sample(neighbor_num[int(neighbor_node)], int(mask_num))
 
-    mask_inter = random.sample(neighbor_num[int(neighbor_node)],int(mask_num))
-
-    # only update 64 road_node,
-    # It has 16 roads'states which start_intersection is virtual are not known.
-
-    # add phase:road_feature(,,11) or no phase:road_feature(,,3)
-    road_feature = np.zeros((len(state), int(num_roads), 11), dtype=np.float32)
     # road_update:0:roads related to virtual inter,1:unmasked,2:masked
     road_update = np.zeros(int(num_roads), dtype=np.int32)
 
-    for id_time, step_dict in enumerate(state):
-        for id_node, node_dict in enumerate(step_dict):
-            if id_node in mask_inter:
-                if id_time == 0:
-                    in_roads = inter_in_roads[inter_dict_id2inter[id_node]]
+    all_road_feature = []
+
+    for state_dic in state_file:
+        with open(state_dic, "rb") as f_ob:
+            state = pickle.load(f_ob)
+        # only update 64 road_node,
+        # It has 16 roads'states which start_intersection is virtual are not known.
+
+        # add phase:road_feature(,,11) or no phase:road_feature(,,3)
+        road_feature = np.zeros(
+            (len(state), int(num_roads), 11), dtype=np.float32)
+
+        for id_time, step_dict in enumerate(state):
+            for id_node, node_dict in enumerate(step_dict):
+                if id_node in mask_inter:
+                    if id_time == 0:
+                        in_roads = inter_in_roads[inter_dict_id2inter[id_node]]
+                        for id_road, road in enumerate(in_roads):
+                            road_id = road_dict_road2id[road]
+                            road_update[road_id] = 2
+                else:
+                    obs = node_dict[0][0]
+                    phase = phase_to_onehot(node_dict[1], 8)[0]
+                    direction = []
+                    if obs.shape[-1] == 12:
+
+                        '''
+                        3 dims:left,straight,right
+                        list order:N,E,S,W
+                        N = obs[0:3]
+                        E = obs[3:6]
+                        S = obs[7:10]
+                        W = obs[10:13]
+                        '''
+
+                        direction.append(np.concatenate([obs[0:3], phase]))
+                        direction.append(np.concatenate([obs[3:6], phase]))
+                        direction.append(np.concatenate([obs[6:9], phase]))
+                        direction.append(np.concatenate([obs[9:], phase]))
+                    inter = inter_dict_id2inter[id_node]
+
+                    # the order of in_roads are the same as list order
+                    in_roads = inter_in_roads[inter]
                     for id_road, road in enumerate(in_roads):
                         road_id = road_dict_road2id[road]
-                        road_update[road_id] = 2
-            else:
-                obs = node_dict[0][0]
-                phase = phase_to_onehot(node_dict[1],8)[0]
-                direction = []
-                if obs.shape[-1] == 12:
-
-                    '''
-                    3 dims:left,straight,right
-                    list order:N,E,S,W
-                    N = obs[0:3]
-                    E = obs[3:6]
-                    S = obs[7:10]
-                    W = obs[10:13]
-                    '''
-
-                    direction.append(np.concatenate([obs[0:3],phase]))
-                    direction.append(np.concatenate([obs[3:6],phase]))
-                    direction.append(np.concatenate([obs[6:9],phase]))
-                    direction.append(np.concatenate([obs[9:],phase]))
-                inter = inter_dict_id2inter[id_node]
-
-                # the order of in_roads are the same as list order
-                in_roads = inter_in_roads[inter]
-                for id_road, road in enumerate(in_roads):
-                    road_id = road_dict_road2id[road]
-                    road_feature[id_time][road_id] = direction[id_road]
-                    if id_time == 0:
-                        road_update[road_id] = 1
-        for update_id,update in enumerate(road_update):
-            # unknow road_node
-            if update != 1:
-                rand_id = random.randint(0, num_roads-1)
-                while road_update[rand_id] == 1:
+                        road_feature[id_time][road_id] = direction[id_road]
+                        if id_time == 0:
+                            road_update[road_id] = 1
+            for update_id, update in enumerate(road_update):
+                # unknow road_node
+                if update != 1:
                     rand_id = random.randint(0, num_roads-1)
-                road_feature[id_time][update_id] = road_feature[id_time][rand_id]
-
-    road_info = {'road_feature': road_feature, 'road_update': road_update}
+                    while road_update[rand_id] != 1:
+                        rand_id = random.randint(0, num_roads-1)
+                    road_feature[id_time][update_id] = road_feature[id_time][rand_id]
+        all_road_feature.append(road_feature)
+    road_info = {'road_feature': all_road_feature, 'road_update': road_update}
     with open(save_dir, 'wb') as fw:
         pickle.dump(road_info, fw)
     print("save road_node_info done")
 
 
 def search_data(sequence_length, num_of_depend, label_start_idx,
-                num_for_predict, units, points_per_hour):
+                len_input, num_for_predict, units, points_per_hour):
     '''
     Parameters
     ----------
@@ -319,7 +327,7 @@ def search_data(sequence_length, num_of_depend, label_start_idx,
     x_idx = []
     for i in range(1, num_of_depend + 1):
         start_idx = label_start_idx - points_per_hour * units * i
-        end_idx = start_idx + num_for_predict
+        end_idx = start_idx + len_input
         if start_idx >= 0:
             x_idx.append((start_idx, end_idx))
         else:
@@ -332,7 +340,7 @@ def search_data(sequence_length, num_of_depend, label_start_idx,
 
 
 def get_sample_indices(data_sequence, num_of_weeks, num_of_days, num_of_hours,
-                       label_start_idx, num_for_predict, points_per_hour):
+                       label_start_idx, len_input, num_for_predict, points_per_hour):
     '''
     Parameters
     ----------
@@ -362,29 +370,29 @@ def get_sample_indices(data_sequence, num_of_weeks, num_of_days, num_of_hours,
     if label_start_idx + num_for_predict > data_sequence.shape[0]:
         return week_sample, day_sample, hour_sample, None
 
-    if num_of_weeks > 0:
-        week_indices = search_data(data_sequence.shape[0], num_of_weeks,
-                                   label_start_idx, num_for_predict,
-                                   7 * 24, points_per_hour)
-        if not week_indices:
-            return None, None, None, None
+    # if num_of_weeks > 0:
+    #     week_indices = search_data(data_sequence.shape[0], num_of_weeks,
+    #                                label_start_idx, num_for_predict,
+    #                                7 * 24, points_per_hour)
+    #     if not week_indices:
+    #         return None, None, None, None
 
-        week_sample = np.concatenate([data_sequence[i: j]
-                                      for i, j in week_indices], axis=0)
+    #     week_sample = np.concatenate([data_sequence[i: j]
+    #                                   for i, j in week_indices], axis=0)
 
-    if num_of_days > 0:
-        day_indices = search_data(data_sequence.shape[0], num_of_days,
-                                  label_start_idx, num_for_predict,
-                                  24, points_per_hour)
-        if not day_indices:
-            return None, None, None, None
+    # if num_of_days > 0:
+    #     day_indices = search_data(data_sequence.shape[0], num_of_days,
+    #                               label_start_idx, num_for_predict,
+    #                               24, points_per_hour)
+    #     if not day_indices:
+    #         return None, None, None, None
 
-        day_sample = np.concatenate([data_sequence[i: j]
-                                     for i, j in day_indices], axis=0)
+    #     day_sample = np.concatenate([data_sequence[i: j]
+    #                                  for i, j in day_indices], axis=0)
 
     if num_of_hours > 0:
         hour_indices = search_data(data_sequence.shape[0], num_of_hours,
-                                   label_start_idx, num_for_predict,
+                                   label_start_idx, len_input, num_for_predict,
                                    1, points_per_hour)
         if not hour_indices:
             return None, None, None, None
@@ -399,54 +407,57 @@ def get_sample_indices(data_sequence, num_of_weeks, num_of_days, num_of_hours,
 
 def read_and_generate_dataset(graph_signal_matrix_filename,
                               num_of_weeks, num_of_days,
-                              num_of_hours, num_for_predict,
+                              num_of_hours, len_input, num_for_predict,
                               points_per_hour, save=False):
     with open(graph_signal_matrix_filename, "rb") as f_ob:
         all_data = pickle.load(f_ob)
-    data_seq = all_data['road_feature']
+    data_all = all_data['road_feature']
     node_update = all_data['road_update']
     all_samples = []
-    for idx in range(data_seq.shape[0]):
-        sample = get_sample_indices(data_seq, num_of_weeks, num_of_days,
-                                    num_of_hours, idx, num_for_predict,
-                                    points_per_hour)
-        if ((sample[0] is None) and (sample[1] is None) and (sample[2] is None)):
-            continue
-        # hour_sample(30,80,11)
-        # target(30,80,11)
-        week_sample, day_sample, hour_sample, target = sample
+    for data_seq in data_all:
+        for idx in range(data_seq.shape[0]):
+            sample = get_sample_indices(data_seq, num_of_weeks, num_of_days,
+                                        num_of_hours, idx, len_input, num_for_predict,
+                                        points_per_hour)
+            if ((sample[0] is None) and (sample[1] is None) and (sample[2] is None)):
+                continue
+            # hour_sample(30,80,11)
+            # target(30,80,11)
+            week_sample, day_sample, hour_sample, target = sample
 
-        # [(week_sample),(day_sample),(hour_sample),target,time_sample]
-        sample = []
+            # [(week_sample),(day_sample),(hour_sample),target,time_sample]
+            sample = []
 
-        if num_of_weeks > 0:
-            week_sample = np.expand_dims(week_sample, axis=0).transpose(
+            # if num_of_weeks > 0:
+            #     week_sample = np.expand_dims(week_sample, axis=0).transpose(
+            #         (0, 2, 3, 1))  # (1,N,F,T)
+            #     sample.append(week_sample)
+
+            # if num_of_days > 0:
+            #     day_sample = np.expand_dims(day_sample, axis=0).transpose(
+            #         (0, 2, 3, 1))  # (1,N,F,T)
+            #     sample.append(day_sample)
+
+            if num_of_hours > 0:
+                # before:hour_sample:(30,80,4)
+                # after expand:(1,30,80,4)
+                # after transpose:(1,80,4,30)
+                hour_sample = np.expand_dims(hour_sample, axis=0).transpose(
+                    (0, 2, 3, 1))  # (1,N,F,T)
+                sample.append(hour_sample)
+
+            target = np.expand_dims(target, axis=0).transpose(
                 (0, 2, 3, 1))  # (1,N,F,T)
-            sample.append(week_sample)
+            target = target[:, :, [0, 1, 2]]
+            sample.append(target)
 
-        if num_of_days > 0:
-            day_sample = np.expand_dims(day_sample, axis=0).transpose(
-                (0, 2, 3, 1))  # (1,N,F,T)
-            sample.append(day_sample)
+            time_sample = np.expand_dims(np.array([idx]), axis=0)  # (1,1)
+            sample.append(time_sample)
 
-        if num_of_hours > 0:
-            # before:hour_sample:(30,80,4)
-            # after expand:(1,30,80,4)
-            # after transpose:(1,80,4,30)
-            hour_sample = np.expand_dims(hour_sample, axis=0).transpose(
-                (0, 2, 3, 1))  # (1,N,F,T)
-            sample.append(hour_sample)
+            all_samples.append(
+                sample)  # sampe：[(week_sample),(day_sample),(hour_sample),target,time_sample] = [(1,N,F,Tw),(1,N,F,Td),(1,N,F,Th),(1,N,F,Tpre),(1,1)]
 
-        target = np.expand_dims(target, axis=0).transpose(
-            (0, 2, 3, 1))  # (1,N,F,T)
-        sample.append(target)
-
-        time_sample = np.expand_dims(np.array([idx]), axis=0)  # (1,1)
-        sample.append(time_sample)
-
-        all_samples.append(
-            sample)  # sampe：[(week_sample),(day_sample),(hour_sample),target,time_sample] = [(1,N,F,Tw),(1,N,F,Td),(1,N,F,Th),(1,N,F,Tpre),(1,1)]
-    # len(all_samples):121
+    random.shuffle(all_samples)
     split_line1 = int(len(all_samples) * 0.6)
     split_line2 = int(len(all_samples) * 0.8)
 
@@ -513,10 +524,11 @@ def read_and_generate_dataset(graph_signal_matrix_filename,
     print('node update matrix :', all_data['node_update'].shape)
 
     if save:
-        file = os.path.basename(graph_signal_matrix_filename).split('.')[0]
-        dirpath = os.path.dirname(graph_signal_matrix_filename)
-        filename = os.path.join(dirpath, file + '_r' + str(num_of_hours) +
-                                '_d' + str(num_of_days) + '_w' + str(num_of_weeks)) + '_astcgn'
+        # file = os.path.basename(graph_signal_matrix_filename).split('.')[0]
+        # dirpath = os.path.dirname(graph_signal_matrix_filename)
+        # filename = os.path.join(dirpath, file + '_r' + str(num_of_hours) +
+        #                         '_d' + str(num_of_days) + '_w' + str(num_of_weeks)) + '_astcgn'
+        filename = graph_signal_matrix_filename.split('.')[0]+'_dataset.pkl'
         print('save file:', filename)
         dataset_info = {'train_x': all_data['train']['x'], 'train_target': all_data['train']['target'],
                         'train_timestamp': all_data['train']['timestamp'],
@@ -529,6 +541,58 @@ def read_and_generate_dataset(graph_signal_matrix_filename,
         with open(filename, 'wb') as fw:
             pickle.dump(dataset_info, fw)
     return all_data
+
+
+def read_output(output_file, relation_file, save_file):
+    # save_len = len(save_file)
+    num = 0
+    for output in output_file:
+        with open(output, 'rb') as f_op:
+            output_data = pickle.load(f_op)
+        re_data = {}
+        for op_dic in output_data:
+            if op_dic == 'input':
+                continue
+            state_data = reconstruct_data(
+                output_data[op_dic], relation_file)
+            re_data[op_dic] = state_data
+        with open(save_file[num], 'wb') as f_sf:
+            pickle.dump(state_data, f_sf)
+        num += 1
+    print("Convert Done!")
+
+
+def reconstruct_data(data, relation_file):
+    '''
+    convert data from road graph to intersection graph
+    input shape:(B,N_road,3,T)
+    output shape:(B,N_inter,12,T)
+    '''
+    with open(relation_file, 'rb') as f_r:
+        relation = pickle.load(f_r)
+    # inter_dict_id2inter = relation['inter_dict_id2inter']
+    inter_dict_inter2id = relation['inter_dict_inter2id']
+    road_dict_road2id = relation['road_dict_road2id']
+    inter_in_roads = relation['inter_in_roads']
+    road_dict_road2id = relation['road_dict_road2id']
+    # num_roads = len(road_dict_road2id)
+    # net_shape = relation['net_shape']
+    # neighbor_num = relation['neighbor_num']
+
+    # (B,N,F,T)->(B,T,N,F)
+    data = np.transpose(data, (0, 3, 1, 2))
+    inter_feature = np.zeros((data.shape[0], data.shape[1], len(
+        inter_dict_inter2id), 12), dtype=np.float32)
+    for inter_dic in inter_in_roads:
+        in_roads = inter_in_roads[inter_dic]
+        in_roads_id = [road_dict_road2id[road] for road in in_roads]
+        N = data[:, :, [in_roads_id[0]]]
+        E = data[:, :, [in_roads_id[1]]]
+        S = data[:, :, [in_roads_id[2]]]
+        W = data[:, :, [in_roads_id[3]]]
+        inter_feature[:, :, [inter_dict_inter2id[inter_dic]]
+                      ] = np.concatenate([N, E, S, W], axis=3)
+    return inter_feature
 
 
 if __name__ == "__main__":
@@ -555,12 +619,23 @@ if __name__ == "__main__":
     relation_filename = data_config['relation_filename']
     neighbor_node = data_config['neighbor_node']
     mask_num = data_config['mask_num']
-    state_file = data_config['state_file']
+    state_basedir = data_config['state_basedir']
+
+    if not os.path.exists(state_basedir):
+        os.makedirs(state_basedir)
+    if not os.path.exists(os.path.dirname(graph_signal_matrix_filename)):
+        os.makedirs(os.path.dirname(graph_signal_matrix_filename))
+
     # read state of intersections,convert it into state which road graph needed,save.
-    # state_file = "./roadgraph/hz/rawstate_4x4.pkl"
-    build_road_state(relation_filename, state_file, neighbor_node, mask_num,
+    state_file = ['rawstate_4x4_199_or.pkl', 'rawstate_4x4_199.pkl']
+    state_file_list = [os.path.join(state_basedir, s_dic)
+                       for s_dic in state_file]
+    graph_signal_matrix_filename = graph_signal_matrix_filename.split(
+        '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'.pkl'
+    build_road_state(relation_filename, state_file_list, neighbor_node, mask_num,
                      save_dir=graph_signal_matrix_filename)
 
     # according to file of task above, generate train set,val set and test set.
     all_data = read_and_generate_dataset(
-        graph_signal_matrix_filename, 0, 0, num_of_hours, num_for_predict, points_per_hour=points_per_hour, save=True)
+        graph_signal_matrix_filename, 0, 0, num_of_hours, len_input, num_for_predict, points_per_hour=points_per_hour, save=True)
+
