@@ -332,7 +332,6 @@ class ASTGCN_submodule(nn.Module):
 
 def make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx, num_for_predict, len_input, num_of_vertices):
     '''
-
     :param DEVICE:
     :param nb_block:
     :param in_channels:
