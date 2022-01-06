@@ -115,8 +115,9 @@ class MultiHeadAttModel(MessagePassing):
 
         alpha_i = ecexp_i / normst_i  # [5, 64]
         alpha_i_expand = alpha_i.repeat(self.dv, 1, 1)
-        alpha_i_expand = torch.permute(alpha_i_expand, (1, 2, 0))  # [5, 64, 16]
-        # TODO: test x_j or x_i here -> should be x_j
+
+        # alpha_i_expand = torch.permute(alpha_i_expand, (1, 2, 0))  # [5, 64, 16]
+        alpha_i_expand = alpha_i_expand.permute(1, 2, 0)  # [5, 64, 16]
         hidden_neighbor = F.relu(self.hidden_embedding(x_j))
         hidden_neighbor = hidden_neighbor.view(hidden_neighbor.shape[:-1][0], self.nv, self.dv)
         hidden_neighbor_repr = hidden_neighbor.permute(1, 0, 2)  # [5, 64, 16]
@@ -260,7 +261,7 @@ class CoLightAgent(RLAgent):
         # In.append(Input(shape=[self.num_agents,self.len_feature],name="feature"))
         # In.append(Input(shape=(self.num_agents,self.num_neighbors,self.num_agents),name="adjacency_matrix"))
         #TODO: keep no phase
-        model = ColightNet(self.ob_length, **self.passer)
+        model = ColightNet(self.ob_length + self.action_space.n, **self.passer)
         #model = ColightNet(self.action_space.n + self.ob_length, **self.passer)
         # if self.graph_setting["N_LAYERS"]>1:
         #     att_record_all_layers=Concatenate(axis=1)(att_record_all_layers)
@@ -291,8 +292,10 @@ class CoLightAgent(RLAgent):
         # act_values = self.model.predict([phase, ob])
 
         e_ob = torch.tensor(ob, dtype=torch.float32)
+        e_phase = F.one_hot(torch.tensor(phase, dtype=torch.long), self.action_space.n)
+        e_x = torch.concat([e_ob, e_phase], dim=1)
         edge = self.edge_idx
-        dt = Data(x=e_ob, edge_index=edge)
+        dt = Data(x=e_x, edge_index=edge)
 
         #e_phase = F.one_hot(torch.tensor(phase, dtype=torch.long), self.action_space.n)
         #x = torch.concat([e_ob, e_phase], dim=1)
@@ -368,7 +371,15 @@ class CoLightAgent(RLAgent):
 
     def remember(self, ob, phase, action, reward, next_ob, next_phase):
         self.replay_buffer.append((ob, phase, action, reward, next_ob, next_phase))
-    """
+
+    def apply_mask(self, index):
+        return None
+
+    def apply_inference(self, masked_state, inference_state, mask_pos):
+        masked_state = np.array(masked_state)
+        masked_state[mask_pos, :] = inference_state[mask_pos, :]
+        return masked_state.tolist()
+
     def _encode_sample(self, minibatch):
         batch_list = []
         batch_list_p = []
@@ -378,42 +389,15 @@ class CoLightAgent(RLAgent):
         actions = []
         rewards = []
         for dp in minibatch:
-            cat = F.one_hot(torch.tensor(dp[1], dtype=torch.long), self.action_space.n)
+            phase = F.one_hot(torch.tensor(dp[1], dtype=torch.long), self.action_space.n)
             state = torch.tensor(dp[0], dtype=torch.float32)
-            x = torch.concat([state, cat], dim=1)
+            x = torch.concat([state, phase], dim=1)
             batch_list.append(Data(x=x, edge_index=self.edge_idx))
 
-            cat_p = F.one_hot(torch.tensor(dp[5], dtype=torch.long), self.action_space.n)
+            phase_p = F.one_hot(torch.tensor(dp[5], dtype=torch.long), self.action_space.n)
             state_p = torch.tensor(dp[4], dtype=torch.float32)
-            x_p = torch.concat([state_p, cat_p], dim=1)
+            x_p = torch.concat([state_p, phase_p], dim=1)
             batch_list_p.append(Data(x=x_p, edge_index=self.edge_idx))
-            rewards.append(dp[3])
-            actions.append(dp[2])
-        batch_t = Batch.from_data_list(batch_list)
-        batch_tp = Batch.from_data_list(batch_list_p)
-        # TODO reshape slow warning
-        rewards = torch.tensor(np.array(rewards), dtype=torch.float32)
-        rewards = rewards.view(rewards.shape[0] * rewards.shape[1])
-        actions = torch.tensor(np.array(actions), dtype=torch.long)
-        actions = actions.view(actions.shape[0] * actions.shape[1])
-        return batch_t, batch_tp, rewards, actions
-    """
-
-    def _encode_sample(self, minibatch):
-        batch_list = []
-        batch_list_p = []
-        #ob_t, phase_t, actions_t, rewards_t, ob_tp1, phase_tp1 = list(zip(*minibatch))
-        #rewards = torch.tensor(rewards_t, dtype=torch.float32)
-        #actions = actions_t
-        actions = []
-        rewards = []
-        for dp in minibatch:
-            state = torch.tensor(dp[0], dtype=torch.float32)
-
-            batch_list.append(Data(x=state, edge_index=self.edge_idx))
-
-            state_p = torch.tensor(dp[4], dtype=torch.float32)
-            batch_list_p.append(Data(x=state_p, edge_index=self.edge_idx))
             rewards.append(dp[3])
             actions.append(dp[2])
         batch_t = Batch.from_data_list(batch_list)
@@ -478,14 +462,17 @@ class CoLightAgent(RLAgent):
             #print(weights_a[i].data)
             break
 
-    def load_model(self, mdir="model/colight_torch", prefix='', e=0):
+    def load_model(self, mdir="model/colight_torch_4x4_hz", prefix='', e=0):
         """
         mdir is the path of model
         """
         # name = "netlight_agent_{}".format(self.iid)
         # model_name = os.path.join(mdir, name)
-        name = "colight_agent_{}_{}.pt".format(prefix, e)
+        # name = "colight_agent_{}_{}.pt".format(prefix, e)
+        name = "colight_agent_{}_{}.pt".format(prefix,e-1)
         model_name = os.path.join(mdir, name)
+        print("load_model:",model_name)
+        # model_name = mdir
         self.model = ColightNet(self.ob_length, **self.passer)
         self.model.load_state_dict(torch.load(model_name))
         # self.model.load_weights(model_name)

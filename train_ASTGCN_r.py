@@ -11,7 +11,7 @@ import argparse
 import configparser
 from predictionModel.ASTGCN_r import make_model
 from metric.utils import compute_val_loss_mstgcn, predict_and_save_results_mstgcn
-from prepareData import load_graphdata_channel, get_road_adj
+from prepareData import load_graphdata_channel, get_road_adj,read_output
 from tensorboardX import SummaryWriter
 from metric.metrics import masked_mse
 
@@ -38,6 +38,8 @@ points_per_hour = int(data_config['points_per_hour'])
 num_for_predict = int(data_config['num_for_predict'])
 len_input = int(data_config['len_input'])
 dataset_name = data_config['dataset_name']
+neighbor_node = int(data_config['neighbor_node'])
+mask_num = int(data_config['mask_num'])
 
 model_name = training_config['model_name']
 
@@ -64,13 +66,16 @@ loss_function = training_config['loss_function']
 metric_method = training_config['metric_method']
 missing_value = float(training_config['missing_value'])
 
-folder_dir = '%s_h%dd%dw%d_channel%d_%e' % (
-    model_name, num_of_hours, num_of_days, num_of_weeks, in_channels, learning_rate)
+folder_dir = 's%d_p%d_n%d_m%d' % (
+    points_per_hour, num_for_predict, neighbor_node, mask_num)
 print('folder_dir:', folder_dir)
 params_path = os.path.join('experiments', dataset_name, folder_dir)
 print('params_path:', params_path)
 
 # graph_signal_matrix_filename = ./roadgraph/hz/state_4x4.pkl
+graph_signal_matrix_filename = graph_signal_matrix_filename.split(
+    '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'_dataset.pkl'
+
 train_loader, train_target_tensor, val_loader, val_target_tensor, test_loader, test_target_tensor, _mean, _std, mask_matrix = load_graphdata_channel(
     graph_signal_matrix_filename, num_of_hours,
     num_of_days, num_of_weeks, DEVICE, batch_size)
@@ -230,7 +235,18 @@ def predict_main(global_step, data_loader, data_target_tensor, metric_method, _m
 
     predict_and_save_results_mstgcn(net, data_loader, data_target_tensor,
                                     global_step, metric_method, _mean, _std, params_path, mask_matrix, type)
+    
+    # convert feature from road to intersection 
+    output_dir = os.path.join('experiments', dataset_name,
+                              's'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num))
+    output_file = ['output_epoch_'+str(global_step)+'_test.pkl']
+    output_file_list = [os.path.join(output_dir, output_dic)
+                        for output_dic in output_file]
 
+    save_file = ['reconstruct_epoch_'+str(global_step)+'_test.pkl']
+    save_file_list = [os.path.join(output_dir, save_dic)
+                      for save_dic in save_file]
+    read_output(output_file_list, relation_filename, save_file_list)
 
 if __name__ == "__main__":
 
@@ -238,3 +254,4 @@ if __name__ == "__main__":
 
     # predict_main(33, test_loader, test_target_tensor,
     #              metric_method, _mean, _std, mask_matrix, 'test')
+

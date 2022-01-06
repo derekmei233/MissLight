@@ -9,5 +9,9 @@ local/
 experiments/
 roadgraph/
 data/frontend/
+<<<<<<< HEAD
 venv/
 data/replay_dir/
+=======
+picture/
+>>>>>>> origin/easy_predict

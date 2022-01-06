@@ -106,9 +106,9 @@ def compute_val_loss_mstgcn(net, val_loader, criterion,  masked_flag, missing_va
                 loss = criterion(outputs, labels)
 
             tmp.append(loss.item())
-            if batch_index % 100 == 0:
-                print('validation batch %s / %s, loss: %.2f' %
-                      (batch_index + 1, val_loader_length, loss.item()))
+            # if batch_index % 100 == 0:
+            print('validation batch %s / %s, loss: %.2f' %
+                    (batch_index + 1, val_loader_length, loss.item()))
             if (limit is not None) and batch_index >= limit:
                 break
 
@@ -164,9 +164,10 @@ def predict_and_save_results_mstgcn(net, data_loader, data_target_tensor, global
         print('prediction:', prediction.shape)
         print('data_target_tensor:', data_target_tensor.shape)
         output_filename = os.path.join(
-            params_path, 'output_epoch_%s_%s' % (global_step, type))
-        np.savez(output_filename, input=input, prediction=prediction,
-                 data_target_tensor=data_target_tensor)
+            params_path, 'output_epoch_%s_%s.pkl' % (global_step, type))
+        origin_data = {'input':input,'prediction':prediction,'data_target_tensor':data_target_tensor}
+        with open(output_filename, 'wb') as fw:
+            pickle.dump(origin_data, fw)
 
         # 计算误差
         excel_list = []

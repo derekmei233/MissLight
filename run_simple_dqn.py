@@ -171,4 +171,3 @@ if __name__ == '__main__':
     build_relation_intersection_road(world, relation_name)
     if not args.load_model:
         train(args, env)
-    test()

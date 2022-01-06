@@ -13,10 +13,12 @@ from utils import *
 import pickle
 from prepareData import build_relation_intersection_road
 
+# ln -s /usr/local/cuda-11.0/lib64/libcudart.so.10.2 /home/lxl/anaconda3/envs/RlTorch37/bin
+# ln -s /usr/local/cuda-11.0/lib64/libcudart.so.11.0 /home/lxl/anaconda3/envs/RlTorch37/bin/libcudart.so.10.2
 
 # parseargs
 parser = argparse.ArgumentParser(description='Run Example')
-parser.add_argument('--config_file', type=str,help='path of config file')  #road net
+parser.add_argument('--config_file', type=str,default='hz4x4', help='path of config file')  #road net
 parser.add_argument('--thread', type=int, default=4,help='number of threads')  # used in cityflow
 parser.add_argument('--ngpu', type=str, default="-1",help='gpu to be used')  # choose gpu card
 parser.add_argument('-lr','--learning_rate', type=float, default=1e-3, help="learning rate")
@@ -34,25 +36,27 @@ parser.add_argument('--test_steps', type=int,default=3600,help='number of steps 
 parser.add_argument('--action_interval',type=int,default=10,help='how often agent make decisions')
 parser.add_argument('--episodes',type=int,default=200,help='training episodes')
 #parser.add_argument('--test_episodes',type=int,default=10,help='testing episodes')
-parser.add_argument('--load_model_dir',type=str,default=None,help='load this model to test')
-parser.add_argument('--graph_info_dir',type=str,default="syn33",help='load infos about graph(i.e. mapping, adjacent)')
+
+parser.add_argument('--load_model_dir',type=str,default="model/colight_torch_4x4_hz",help='load this model to test')
+parser.add_argument('--graph_info_dir',type=str,default="hz4x4",help='load infos about graph(i.e. mapping, adjacent)')
 parser.add_argument('--train_model', action="store_false", default=True)
 parser.add_argument('--test_model', action="store_true", default=False)
 parser.add_argument('--save_model', action="store_false", default=True)
 parser.add_argument('--load_model', action="store_true", default=False)
 parser.add_argument("--save_rate",type=int,default=100,help="save model once every time this many episodes are completed")
-parser.add_argument('--save_dir',type=str,default="model/colight_torch",help='directory in which model should be saved')
+parser.add_argument('--save_dir',type=str,default="model/colight_torch_4x4_hz",help='directory in which model should be saved')
 #parser.add_argument('--load_dir',type=str,default="model/colight",help='directory in which model should be loaded')
-parser.add_argument('--log_dir',type=str,default="log/colight_torch",help='directory in which logs should be saved')
+parser.add_argument('--log_dir',type=str,default="log/colight_torch_4x4_hz",help='directory in which logs should be saved')
 parser.add_argument('--vehicle_max',type=int,default=1,help='used to normalize node observayion')
 parser.add_argument('--mask_type',type=int,default=0,help='used to specify the type of softmax')
 parser.add_argument('--get_attention', action="store_true", default=False)
 parser.add_argument('--test_when_train', action="store_false", default=True)
-
+parser.add_argument('--state_dir', type=str, default="roadgraph/hz_4x4", help='directory in which roadgraph should be saved')
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.ngpu
-
+if not os.path.exists(args.state_dir):
+    os.makedirs(args.state_dir)
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
 logger = logging.getLogger('main')
@@ -68,7 +72,10 @@ sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
 
-state_name = os.path.join(args.state_dir, "rawstate_4x4.pkl")
+# file of the roadnetwork's states(obs and phase)
+state_name = os.path.join(args.state_dir, "rawstate_4x4_200_or.pkl")
+
+# file of the relation between roads and intersections and other info
 relation_name = os.path.join(args.state_dir, "roadnet_relation_4x4.pkl")
 # create world
 world = World("data/config_dir/config_"+args.config_file+".json", thread_num=args.thread)
@@ -346,12 +353,14 @@ class TrafficLightDQN:
             break
         return trv_time
 
-    def test(self, drop_load=False):
+    def test(self,drop_load=False):
         save_state = []
         if not drop_load:
             model_name=self.args.load_model_dir
+            # model_name='model/colight_torch_4x4_hz/colight_agent_hz4x4_199'
             if model_name is not None:
-                self.agent.load_model(model_name, args.prefix, args.episodes)
+                # self.agent.load_model(model_name, args.predix, args.episodes)
+                self.agent.load_model(mdir=model_name, prefix='hz4x4',e=args.episodes)
             else:
                 raise ValueError("model name should not be none")
         attention_mat_list = []
@@ -371,9 +380,13 @@ class TrafficLightDQN:
                 else:
                     actions = self.agent.get_action(last_phase, obs,test_phase=True)
                 actions = actions
+                save_obs = np.expand_dims(obs,axis=1)
+                save_phase = np.expand_dims(last_phase,axis=1)
+                save_phase = np.expand_dims(save_phase,axis=1)
+                # save_obs = np.expand_dims(list(zip(save_obs,save_phase)),axis=0)
+                save_state.append(list(zip(save_obs,save_phase)))
                 rewards_list = []
-                #TODO: phase information
-                save_state.append(obs)
+
                 for _ in range(self.args.action_interval):
                     obs, rewards, dones, _ = self.env.step(actions)
                     i += 1
@@ -390,16 +403,16 @@ class TrafficLightDQN:
         mean_rwd = np.sum(ep_rwds)/eps_nums
         trv_time = self.env.eng.get_average_travel_time()
         self.logging_tool.info("Final Travel Time is %.4f, and mean rewards %.4f" % (trv_time,mean_rwd))
-        with open(state_name, 'wb') as fo:
-            pickle.dump(save_state, fo)
-        print("save done")
-
         if self.args.get_attention:
             tmpstr = self.args.load_model_dir
             tmpstr=tmpstr.split('/')[-1]
             att_file = "data/analysis/colight/"+tmpstr+"_att_ana.pkl"
             pickle.dump(attention_mat_list,open(att_file,"wb"))
             print("dump the attention matrix to ",att_file)
+        with open(state_name, 'wb') as fo:
+            pickle.dump(save_state, fo)
+        print("save raw state done")
+
         return trv_time
 
     def writeLog(self, mode, step, travel_time, loss, cur_rwd):
@@ -415,18 +428,18 @@ class TrafficLightDQN:
 
 if __name__ == '__main__':
     player = TrafficLightDQN(colightAgent, env, args, logger,file_prefix)
+    player.test()
     build_relation_intersection_road(world, relation_name)
-    if not args.load_model:
-        if args.train_model:
-            print("begin to train model")
-            player.train()
-            player.test(True)
-    if args.test_model:
-        print(args.load_model_dir)
-        if (not args.train_model) and (args.load_model_dir is None):
-            raise ValueError("invalid parameters, load_model_dir should not be None when the agent is not trained")
-        print("begin to test model")
-        player.test()
+    # if args.train_model:
+    #     print("begin to train model")
+    #     player.train()
+    #     player.test(True)
+    # if args.test_model:
+    #     print(args.load_model_dir)
+    #     if (not args.train_model) and (args.load_model_dir is None):
+    #         raise ValueError("invalid parameters, load_model_dir should not be None when the agent is not trained")
+    #     print("begin to test model")
+    #     player.test()
 # simulate
 # import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'

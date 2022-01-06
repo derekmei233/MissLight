@@ -54,6 +54,11 @@ class LaneVehicleGenerator(BaseGenerator):
         ret = np.array([])
         for i in range(len(self.fns)):
             result = results[i]
+
+            # pressure returns result of each intersections, so return directly
+            if self.I.id in result:
+                ret = np.append(ret, result[self.I.id])
+                continue
             fn_result = np.array([])
 
             for road_lanes in self.lanes:
