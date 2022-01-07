@@ -227,52 +227,48 @@ def phase_to_onehot(phase, num_class):
 
 
 # TODO: improve efficiency
-def inter2state(relation_file, mask_pos, deq, idx, num_of_vertices, in_channels, len_input, state_t, phase_t):
-    with open(relation_file, 'rb') as f_re:
-        relation = pickle.load(f_re)
+def inter2state(relation, deq, idx, in_channels, len_input, state_t, phase_t):
     inter_dict_id2inter = relation['inter_dict_id2inter']
     inter_in_roads = relation['inter_in_roads']
     road_dict_road2id = relation['road_dict_road2id']
     num_roads = len(road_dict_road2id)
-    net_shape = relation['net_shape']
-    neighbor_num = relation['neighbor_num']
-    mask_inter = mask_pos
-    masked_x = np.zeros(num_of_vertices, in_channels, len_input)
+    masked_x = np.zeros((num_roads, in_channels, len_input), dtype=np.float32)
+    #check len_input == 30 or not
     # TODO: use state in deque to infer next_t state and substitute masked state. So infer state at t based on deque -> complete state at t
     # TODO: (current state not utilized)
     idx = min(idx, 29)
-    if idx == 0 and state_t is None:
+    if idx == 0 or state_t is None:
         return masked_x
     else:
         for i in range(-1, -idx - 1, -1):
             tmp = deq[i]
             road_feature = np.zeros((int(num_roads), 11), dtype=np.float32)
-            for id_node, node_dict in enumerate(tmp):
-                obs = node_dict[0]
-                phase = phase_to_onehot(node_dict[1], 8)[0]
+            obs = tmp[0]
+            phase = phase_to_onehot(tmp[1], 8)[0]
+            for id_node, ob_length in enumerate(obs):
+                phase_length = phase[id_node]
                 direction = []
-                if obs.shape[-1] == 12:
-                    direction.append(np.concatenate([obs[0:3], phase]))
-                    direction.append(np.concatenate([obs[3:6], phase]))
-                    direction.append(np.concatenate([obs[6:9], phase]))
-                    direction.append(np.concatenate([obs[9:], phase]))
+                direction.append(np.concatenate([ob_length[0:3], phase_length]))
+                direction.append(np.concatenate([ob_length[3:6], phase_length]))
+                direction.append(np.concatenate([ob_length[6:9], phase_length]))
+                direction.append(np.concatenate([ob_length[9:], phase_length]))
                 inter = inter_dict_id2inter[id_node]
                 in_roads = inter_in_roads[inter]
                 for id_road, road in enumerate(in_roads):
+                    # TODO check order here
                     road_id = road_dict_road2id[road]
-                    # TODO: double check here
                     road_feature[road_id] = direction[id_road]
+            masked_x[:, :, i] = road_feature
+        return masked_x
 
 
-def convert_road_state(relation_file, state_file, neighbor_node, mask_pos, save_dir):
+def convert_road_state(relation_file, state_file, mask_pos, save_dir):
     with open(relation_file, 'rb') as f_re:
         relation = pickle.load(f_re)
     inter_dict_id2inter = relation['inter_dict_id2inter']
     inter_in_roads = relation['inter_in_roads']
     road_dict_road2id = relation['road_dict_road2id']
     num_roads = len(road_dict_road2id)
-    net_shape = relation['net_shape']
-    neighbor_num = relation['neighbor_num']
     mask_inter = mask_pos
 
     # road_update:0:roads related to virtual inter,1:unmasked,2:masked
@@ -351,7 +347,6 @@ def get_mask_pos(relation_file, neighbor_node, mask_num):
     mask_inter = random.sample(neighbor_num[int(neighbor_node)], int(mask_num))
     return mask_inter
 
-"""
 def build_road_state(relation_file, state_file, neighbor_node, mask_num, save_dir):
     with open(relation_file, 'rb') as f_re:
         relation = pickle.load(f_re)
@@ -427,7 +422,6 @@ def build_road_state(relation_file, state_file, neighbor_node, mask_num, save_di
         pickle.dump(road_info, fw)
     print("save road_node_info done")
     return mask_inter
-"""
 
 def search_data(sequence_length, num_of_depend, label_start_idx,
                 len_input, num_for_predict, units, points_per_hour):
@@ -722,6 +716,50 @@ def reconstruct_data(data, relation_file):
     return inter_feature
 
 
+def run_preparation(mask_pos):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default='configurations/HZ_4x4_astgcn.conf', type=str,
+                        help="configuration file path")
+    args = parser.parse_args()
+    config = configparser.ConfigParser()
+    print('Read configuration file: %s' % (args.config))
+    config.read(args.config)
+    data_config = config['Data']
+    training_config = config['Training']
+
+    num_of_vertices = int(data_config['num_of_vertices'])
+    points_per_hour = int(data_config['points_per_hour'])
+    num_for_predict = int(data_config['num_for_predict'])
+    len_input = int(data_config['len_input'])
+    dataset_name = data_config['dataset_name']
+    num_of_weeks = int(training_config['num_of_weeks'])
+    num_of_days = int(training_config['num_of_days'])
+    num_of_hours = int(training_config['num_of_hours'])
+    graph_signal_matrix_filename = data_config['graph_signal_matrix_filename']
+    relation_filename = data_config['relation_filename']
+    neighbor_node = data_config['neighbor_node']
+    mask_num = data_config['mask_num']
+    state_basedir = data_config['state_basedir']
+
+    if not os.path.exists(state_basedir):
+        os.makedirs(state_basedir)
+    if not os.path.exists(os.path.dirname(graph_signal_matrix_filename)):
+        os.makedirs(os.path.dirname(graph_signal_matrix_filename))
+
+    # read state of intersections,convert it into state which road graph needed,save.
+
+    state_file = ['rawstate_4x4.pkl']
+    state_file_list = [os.path.join(state_basedir, s_dic)
+                       for s_dic in state_file]
+    graph_signal_matrix_filename = graph_signal_matrix_filename.split(
+        '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'.pkl'
+    convert_road_state(relation_filename, state_file_list, mask_pos,
+                     save_dir=graph_signal_matrix_filename)
+
+    # according to file of task above, generate train set,val set and test set.
+    all_data = read_and_generate_dataset(
+        graph_signal_matrix_filename, 0, 0, num_of_hours, len_input, num_for_predict, points_per_hour=points_per_hour, save=True)
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -754,12 +792,13 @@ if __name__ == "__main__":
         os.makedirs(os.path.dirname(graph_signal_matrix_filename))
 
     # read state of intersections,convert it into state which road graph needed,save.
-    state_file = ['rawstate_4x4_199_or.pkl', 'rawstate_4x4_199.pkl']
+
+    state_file = ['rawstate_4x4.pkl']
     state_file_list = [os.path.join(state_basedir, s_dic)
                        for s_dic in state_file]
     graph_signal_matrix_filename = graph_signal_matrix_filename.split(
         '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'.pkl'
-    build_road_state(relation_filename, state_file_list, neighbor_node, mask_num,
+    convert_road_state(relation_filename, state_file_list, mask_pos,
                      save_dir=graph_signal_matrix_filename)
 
     # according to file of task above, generate train set,val set and test set.

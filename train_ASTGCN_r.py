@@ -11,7 +11,7 @@ import argparse
 import configparser
 from predictionModel.ASTGCN_r import make_model
 from metric.utils import compute_val_loss_mstgcn, predict_and_save_results_mstgcn
-from prepareData import load_graphdata_channel, get_road_adj,read_output
+from prepareData import load_graphdata_channel, get_road_adj, read_output
 from tensorboardX import SummaryWriter
 from metric.metrics import masked_mse
 
@@ -86,7 +86,7 @@ net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filte
                  num_for_predict, len_input, num_of_vertices)
 
 
-def train_main():
+def train_main(inference_net):
     if (start_epoch == 0) and (not os.path.exists(params_path)):
         os.makedirs(params_path)
         print('create params directory %s' % (params_path))
@@ -125,15 +125,15 @@ def train_main():
     # elif loss_function == 'rmse':
     #     criterion = nn.MSELoss().to(DEVICE)
     #     masked_flag = 0
-    optimizer = optim.Adam(net.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(inference_net.parameters(), lr=learning_rate)
     sw = SummaryWriter(logdir=params_path, flush_secs=5)
-    print(net)
+    print(inference_net)
 
     print('Net\'s state_dict:')
     total_param = 0
-    for param_tensor in net.state_dict():
-        print(param_tensor, '\t', net.state_dict()[param_tensor].size())
-        total_param += np.prod(net.state_dict()[param_tensor].size())
+    for param_tensor in inference_net.state_dict():
+        print(param_tensor, '\t', inference_net.state_dict()[param_tensor].size())
+        total_param += np.prod(inference_net.state_dict()[param_tensor].size())
     print('Net\'s total params:', total_param)
 
     print('Optimizer\'s state_dict:')
@@ -151,7 +151,7 @@ def train_main():
         params_filename = os.path.join(
             params_path, 'epoch_%s.params' % start_epoch)
 
-        net.load_state_dict(torch.load(params_filename))
+        inference_net.load_state_dict(torch.load(params_filename))
 
         print('start epoch:', start_epoch)
 
@@ -164,18 +164,18 @@ def train_main():
 
         if masked_flag:
             val_loss = compute_val_loss_mstgcn(
-                net, val_loader, criterion_masked, masked_flag, missing_value, sw, epoch, mask_matrix)
+                inference_net, val_loader, criterion_masked, masked_flag, missing_value, sw, epoch, mask_matrix)
         else:
             val_loss = compute_val_loss_mstgcn(
-                net, val_loader, criterion, masked_flag, missing_value, sw, epoch, mask_matrix)
+                inference_net, val_loader, criterion, masked_flag, missing_value, sw, epoch, mask_matrix)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
-            torch.save(net.state_dict(), params_filename)
+            torch.save(inference_net.state_dict(), params_filename)
             print('save parameters to file: %s' % params_filename)
 
-        net.train()  # ensure dropout layers are in train mode
+        inference_net.train()  # ensure dropout layers are in train mode
 
         type = 'train'
 
@@ -185,7 +185,7 @@ def train_main():
 
             optimizer.zero_grad()
 
-            outputs = net(encoder_inputs)
+            outputs = inference_net(encoder_inputs)
 
             if masked_flag:
                 loss = criterion_masked(
@@ -211,11 +211,11 @@ def train_main():
     print('best epoch:', best_epoch)
 
     # apply the best model on the test set
-    predict_main(best_epoch, test_loader, test_target_tensor,
+    predict_main(inference_net, best_epoch, test_loader, test_target_tensor,
                  metric_method, _mean, _std, mask_matrix, 'test')
 
 
-def predict_main(global_step, data_loader, data_target_tensor, metric_method, _mean, _std, mask_matrix, type):
+def predict_main(inference_net, global_step, data_loader, data_target_tensor, metric_method, _mean, _std, mask_matrix, type):
     '''
 
     :param global_step: int
@@ -231,9 +231,9 @@ def predict_main(global_step, data_loader, data_target_tensor, metric_method, _m
         params_path, 'epoch_%s.params' % global_step)
     print('load weight from:', params_filename)
 
-    net.load_state_dict(torch.load(params_filename))
+    inference_net.load_state_dict(torch.load(params_filename))
 
-    predict_and_save_results_mstgcn(net, data_loader, data_target_tensor,
+    predict_and_save_results_mstgcn(inference_net, data_loader, data_target_tensor,
                                     global_step, metric_method, _mean, _std, params_path, mask_matrix, type)
     
     # convert feature from road to intersection 
@@ -250,7 +250,7 @@ def predict_main(global_step, data_loader, data_target_tensor, metric_method, _m
 
 if __name__ == "__main__":
 
-    train_main()
+    train_main(net)
 
     # predict_main(33, test_loader, test_target_tensor,
     #              metric_method, _mean, _std, mask_matrix, 'test')
