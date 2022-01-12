@@ -71,8 +71,8 @@ folder_dir = 's%d_p%d_n%d_m%d' % (
 print('folder_dir:', folder_dir)
 params_path = os.path.join('experiments', dataset_name, folder_dir)
 print('params_path:', params_path)
-
 # graph_signal_matrix_filename = ./roadgraph/hz/state_4x4.pkl
+"""
 graph_signal_matrix_filename = graph_signal_matrix_filename.split(
     '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'_dataset.pkl'
 
@@ -84,9 +84,17 @@ adj_mx = get_road_adj(relation_filename)
 
 net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
                  num_for_predict, len_input, num_of_vertices)
+"""
 
 
-def train_main(inference_net):
+def train_main(inference_net, start_epoch, graph_signal_matrix_filename, relation_filename):
+
+    train_loader, train_target_tensor, val_loader, val_target_tensor, test_loader, test_target_tensor, _mean, _std, mask_matrix = load_graphdata_channel(
+        graph_signal_matrix_filename, num_of_hours,
+        num_of_days, num_of_weeks, DEVICE, batch_size)
+    if start_epoch != 0:
+        start_epoch = start_epoch
+
     if (start_epoch == 0) and (not os.path.exists(params_path)):
         os.makedirs(params_path)
         print('create params directory %s' % (params_path))
@@ -158,7 +166,7 @@ def train_main(inference_net):
         print('load weight from: ', params_filename)
 
     # train model
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(start_epoch, start_epoch + epochs):
 
         params_filename = os.path.join(params_path, 'epoch_%s.params' % epoch)
 
@@ -212,10 +220,19 @@ def train_main(inference_net):
 
     # apply the best model on the test set
     predict_main(inference_net, best_epoch, test_loader, test_target_tensor,
-                 metric_method, _mean, _std, mask_matrix, 'test')
+                 metric_method, _mean, _std, mask_matrix, 'test', relation_filename)
+
+    best_param_path = os.path.join(
+        params_path, 'epoch_%s.params' % best_epoch)
+    inference_net.load_state_dict(torch.load(best_param_path))
+    final_param_path = os.path.join(
+        params_path, 'epoch_%s.params' % (start_epoch + epochs))
+    torch.save(inference_net.state_dict(), final_param_path)
+
+    return inference_net
 
 
-def predict_main(inference_net, global_step, data_loader, data_target_tensor, metric_method, _mean, _std, mask_matrix, type):
+def predict_main(inference_net, global_step, data_loader, data_target_tensor, metric_method, _mean, _std, mask_matrix, type, relation_filename):
     '''
 
     :param global_step: int
@@ -248,9 +265,9 @@ def predict_main(inference_net, global_step, data_loader, data_target_tensor, me
                       for save_dic in save_file]
     read_output(output_file_list, relation_filename, save_file_list)
 
-if __name__ == "__main__":
 
-    train_main(net)
+if __name__ == "__main__":
+    print("")
 
     # predict_main(33, test_loader, test_target_tensor,
     #              metric_method, _mean, _std, mask_matrix, 'test')

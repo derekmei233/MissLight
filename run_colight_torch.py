@@ -318,7 +318,8 @@ class TrafficLightDQN:
                 self.train_test(e)
         self.agent.save_model(self.args.save_dir, prefix=args.prefix, e=self.args.episodes)
 
-    def train_test(self,e):
+    # use train_test to generate training data for semi-supervised learning framework
+    def train_test(self, e):
         obs = self.env.reset()
         ep_rwds = [0 for i in range(len(self.world.intersections))]
         eps_nums = 0
@@ -330,7 +331,7 @@ class TrafficLightDQN:
                     node_id_str = self.agent.graph_setting["ID2INTER_MAPPING"][j]
                     node_dict = self.world.id2intersection[node_id_str]
                     last_phase.append(node_dict.current_phase)
-                actions = self.agent.get_action(last_phase, obs,test_phase=True)
+                actions = self.agent.get_action(last_phase, obs, test_phase=True)
                 actions = actions
                 rewards_list = []
                 for _ in range(self.args.action_interval):
@@ -353,7 +354,7 @@ class TrafficLightDQN:
             break
         return trv_time
 
-    def test(self,drop_load=False):
+    def test(self, drop_load=False):
         save_state = []
         if not drop_load:
             model_name=self.args.load_model_dir

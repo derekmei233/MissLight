@@ -60,7 +60,7 @@ class MaxPressureAgent(BaseAgent):
         road_dict_road2id = relation['road_dict_road2id']
         num_roads = len(road_dict_road2id)
         lvc = np.zeros((num_roads, in_channels - 8), dtype=np.float32)
-        # TODO : double check its reversed or not
+        # TODO : double check its reversed or not. yes its reversed
         for id_node, ob_length in enumerate(obs):
             direction = []
             direction.append(ob_length[0:3])

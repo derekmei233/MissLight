@@ -12,11 +12,12 @@ import logging
 from datetime import datetime
 from utils import *
 import pickle
-from prepareData import build_relation_intersection_road, get_mask_pos, inter2state, reconstruct_data
+from prepareData import build_relation_intersection_road, get_mask_pos, inter2state, reconstruct_data, run_preparation, get_road_adj
 from predictionModel.ASTGCN_r import make_model
 from metric.utils import compute_val_loss_mstgcn, predict_and_save_results_mstgcn
-from prepareData import load_graphdata_channel, get_road_adj,read_output
 import torch
+from train_ASTGCN_r import train_main
+from collections import deque
 
 
 # TODO: Update per training epoch
@@ -79,10 +80,11 @@ sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
 
-state_name = os.path.join(args.state_dir, "rawstate_4x4_200_or.pkl")
-
 # file of the relation between roads and intersections and other info
-relation_name = os.path.join(args.state_dir, "roadnet_relation_4x4.pkl")
+state_basename = args.state_dir
+relation_filename = os.path.join(args.state_dir, "roadnet_relation_4x4.pkl")
+graph_signal_matrix_filename = os.path.join(args.state_dir, 'state_data/state_hz4x4.pkl')
+
 # create world
 world = World("data/config_dir/config_"+args.config_file+".json", thread_num=args.thread)
 graph_info_file_dir = "data/graphinfo/graph_info_"+args.graph_info_dir+".pkl"
@@ -227,15 +229,11 @@ metric = TravelTimeMetric(world)
 env = TSCEnv(world, colightAgent, metric)
 
 # build relationship between intersection to road
-build_relation_intersection_road(world, relation_name)
-
 config = configparser.ConfigParser()
 config.read(args.config)
 data_config = config['Data']
 training_config = config['Training']
 
-relation_filename = data_config['relation_filename']
-graph_signal_matrix_filename = data_config['graph_signal_matrix_filename']
 if config.has_option('Data', 'id_filename'):
     id_filename = data_config['id_filename']
 else:
@@ -280,23 +278,9 @@ params_path = os.path.join('experiments', dataset_name, folder_dir)
 print('params_path:', params_path)
 
 
-
-#TODO: STATE file need processing
-graph_signal_matrix_filename = graph_signal_matrix_filename.split(
-    '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'_dataset.pkl'
-"""
-train_loader, train_target_tensor, val_loader, val_target_tensor, test_loader, test_target_tensor, _mean, _std, mask_matrix = load_graphdata_channel(
-    graph_signal_matrix_filename, num_of_hours,
-    num_of_days, num_of_weeks, DEVICE, batch_size)
-"""
-adj_mx = get_road_adj(relation_filename)
-masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
-
-inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
-                 num_for_predict, len_input, num_of_vertices)
-
 class TrafficLightDQN:
-    def __init__(self, agent, env, args, logging_tool, fprefix):
+    def __init__(self, agent, env, args, logging_tool, fprefix, masked_pos, inference_net,
+                 graph_signal_matrix_filename_nd, graph_signal_matrix_filename_dataset):
         self.agent = agent
         self.env = env
         self.world = world
@@ -304,6 +288,8 @@ class TrafficLightDQN:
         self.yellow_time = self.world.intersections[0].yellow_phase_time
         self.args = args
         self.fprefix = fprefix
+        self.masked_pos = masked_pos
+        self.inference_net = inference_net
         # self.log_file = os.path.join(self.args.log_dir,self.args.prefix+ datetime.now().strftime('%Y%m%d-%H%M%S') + ".yzy.log")
         self.log_file = os.path.join(args.log_dir, self.fprefix + ".yzy.log")
         # self.log_file = file_prefix + ".yzy.log"
@@ -323,6 +309,7 @@ class TrafficLightDQN:
                 self.env.eng.set_replay_file(self.replay_file_dir + "/%s_replay_%s.txt" % (self.fprefix, e))
             else:
                 self.env.eng.set_save_replay(False)
+
             episodes_rewards = [0 for i in range(len(self.world.intersections))]
             episodes_decision_num = 0
             episode_loss = []
@@ -336,39 +323,51 @@ class TrafficLightDQN:
                         node_dict = self.world.id2intersection[node_id_str]
                         last_phase.append(node_dict.current_phase)
                         # last_phase.append([self.world.intersections[j].current_phase])
+                    state_t = np.array(last_obs, dtype=np.float32)
+                    phase_t = np.array(last_phase, dtype=np.int8)
                     if i == 0:
-                        masked_x = inter2state(relation_filename, masked_pos, colightAgent.replay_buffer, i,
-                                               num_of_vertices, in_channels, len_input, last_obs, last_phase)
-                        prediction = inference_net(masked_x)
-                        # TODO: determine output of prediction
-                        inter_feature = reconstruct_data(prediction[np.newaxis,:, :, :], relation_filename)
-                        unmasked_feature = self.agent.apply_inference(masked_x, inter_feature, masked_pos)
-
-                    else:
-                        masked_x =
-
+                        masked_x = inter2state(relation, colightAgent.replay_buffer, total_decision_num, in_channels,
+                                               len_input, None, None)
+                        road_unmasked_t = inference_net.forward(torch.tensor(masked_x[np.newaxis, :, :, :],
+                                                                             dtype=torch.float32, device=DEVICE))
+                        road_unmasked_t = road_unmasked_t.detach().cpu().numpy()
+                        state_unmasked_t = reconstruct_data(road_unmasked_t, relation_filename)[0, 0, :, :]
+                        state_t = apply_inference(state_t, state_unmasked_t, self.masked_pos)
+                        last_obs = state_t.tolist()
                     if (total_decision_num > self.agent.learning_start):
-                        actions = self.agent.get_action(unmasked_feature, last_obs)
+                        actions = self.agent.get_action(last_phase, last_obs)
                         # the retured dimension is [batch, agents],
                         # the batch is 1 when we get action, so we just get the first actions
-                        # TODO revise here
-                        actions = actions
                     else:
                         actions = self.agent.sample(s_size=self.agent.num_agents)
+
                     reward_list = []  # [intervals,agents,reward]
                     for _ in range(self.args.action_interval):
-                        obs, rewards, dones, _ = env.step(actions)
+                        # TODO: reconstruct reward here
+                        obs, _, dones, _ = env.step(actions)
                         i += 1
-                        reward_list.append(rewards)
-                    rewards = np.mean(reward_list, axis=0)  # [agents,reward]
-                    for j in range(len(self.world.intersections)):
-                        episodes_rewards[j] += rewards[j]
                     cur_phase = []
                     for j in range(len(self.world.intersections)):
                         node_id_str = self.agent.graph_setting["ID2INTER_MAPPING"][j]
                         node_dict = self.world.id2intersection[node_id_str]
                         cur_phase.append(node_dict.current_phase)
-                    self.agent.remember(last_obs, last_phase, actions, rewards, obs, cur_phase)
+                    state_tp = np.array(obs, dtype=np.float32)
+                    phase_tp = np.array(cur_phase, dtype=np.int8)
+                    # TODO: check inference at t+1
+                    masked_x = inter2state(relation, colightAgent.replay_buffer, total_decision_num, in_channels,
+                                        len_input, state_t, phase_t)
+                    road_unmasked_tp = inference_net.forward(torch.tensor(masked_x[np.newaxis, :, :, :],
+                                                                         dtype=torch.float32, device=DEVICE))
+                    road_unmasked_tp = road_unmasked_tp.detach().cpu().numpy()
+                    state_unmasked_tp = reconstruct_data(road_unmasked_tp, relation_filename)[0, 0, :, :]
+                    state_tp = apply_inference(state_tp, state_unmasked_tp, self.masked_pos)
+
+                    rewards = state_t - state_tp
+                    for j in range(len(self.world.intersections)):
+                        episodes_rewards[j] += rewards[j]
+                    obs = state_tp.tolist()
+                    # TODO: could cause problem in training
+                    self.agent.remember(last_obs, phase_t, actions, rewards, obs, phase_tp)
                     episodes_decision_num += 1
                     total_decision_num += 1
                     last_obs = obs
@@ -401,48 +400,85 @@ class TrafficLightDQN:
                     "intersection:{}, mean_episode_reward:{}".format(j, episodes_rewards[j] / episodes_decision_num))
             if self.args.test_when_train:
                 self.train_test(e)
+
         self.agent.save_model(self.args.save_dir, prefix=args.prefix, e=self.args.episodes)
+
 
     def train_test(self, e):
         obs = self.env.reset()
         ep_rwds = [0 for i in range(len(self.world.intersections))]
+        replay_buffer = deque(maxlen=args.replay_buffer_size)
         eps_nums = 0
+        save_state = []
         for i in range(self.args.test_steps):
             if i % args.action_interval == 0:
                 last_phase = []
-
                 for j in range(len(self.world.intersections)):
                     node_id_str = self.agent.graph_setting["ID2INTER_MAPPING"][j]
                     node_dict = self.world.id2intersection[node_id_str]
                     last_phase.append(node_dict.current_phase)
-                actions = self.agent.get_action(last_phase, obs, test_phase=True)
+                state_t = np.array(obs, dtype=np.float32)
+                phase_t = np.array(last_phase, dtype=np.int8)
+
+                masked_x = inter2state(relation, colightAgent.replay_buffer, eps_nums, in_channels, len_input, None, None)
+                road_unmasked_t = self.inference_net.forward(torch.tensor(masked_x[np.newaxis, :, :, :],
+                                                        dtype=torch.float32, device=DEVICE))
+                road_unmasked_t = road_unmasked_t.detach().cpu().numpy()
+                state_unmasked_t = reconstruct_data(road_unmasked_t, relation_filename)[0, 0, :, :]
+                state_t = apply_inference(state_t, state_unmasked_t, self.masked_pos)
+                replay_buffer.append((state_t, phase_t))
+                state_t = state_t.tolist()
+                save_obs = np.expand_dims(state_t, axis=1)
+                save_phase = np.expand_dims(last_phase, axis=1)
+                save_phase = np.expand_dims(save_phase, axis=1)
+                save_state.append(list(zip(save_obs, save_phase)))
+                # TODO: May need to change np to list
+                actions = self.agent.get_action(last_phase, state_t, test_phase=True)
                 actions = actions
-                rewards_list = []
+                #rewards_list = []
                 for _ in range(self.args.action_interval):
-                    obs, rewards, dones, _ = self.env.step(actions)
+                    obs, _, dones, _ = self.env.step(actions)
                     i += 1
-                    rewards_list.append(rewards)
-                rewards = np.mean(rewards_list, axis=0)
+                # TODO: need reward or not?
+                """
+                rewards = state_t - state_tp
+                for j in range(len(self.world.intersections)):
+                    episodes_rewards[j] += rewards[j]
                 for j in range(len(self.world.intersections)):
                     ep_rwds[j] += rewards[j]
+                """
+
                 eps_nums += 1
             if all(dones):
                 break
-        mean_rwd = np.sum(ep_rwds) / eps_nums
+
+        with open(state_name, 'wb') as fo:
+            pickle.dump(save_state, fo)
+        run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir)
+        self.inference_net = train_main(self.inference_net, e * epochs, graph_signal_matrix_filename_dataset, relation_filename)
+        os.remove(state_name)
+        os.remove(graph_signal_matrix_filename_nd)
+        os.remove(graph_signal_matrix_filename_dataset)
+
         trv_time = self.env.eng.get_average_travel_time()
         # self.logging_tool.info("Final Travel Time is %.4f, and mean rewards %.4f" % (trv_time,mean_rwd))
+        """
         self.logging_tool.info(
             "Test step:{}/{}, travel time :{}, rewards:{}".format(e, self.args.episodes, trv_time, mean_rwd))
-        self.writeLog("TEST", e, trv_time, 100, mean_rwd)
+        """
+        self.logging_tool.info(
+            "Test step:{}/{}, travel time :{}".format(e, self.args.episodes, trv_time))
+        self.writeLog("TEST", e, trv_time, 100, -1)
         for i in self.agent.model.parameters():
             # print(i[0], i[1].data)
             break
+
         return trv_time
 
-    def test(self, drop_load=False):
+    def test(self, e, drop_load=False):
         save_state = []
         if not drop_load:
-            model_name = self.args.load_model_dir
+            model_name=self.args.load_model_dir
             # model_name='model/colight_torch_4x4_hz/colight_agent_hz4x4_199'
             if model_name is not None:
                 # self.agent.load_model(model_name, args.predix, args.episodes)
@@ -461,10 +497,10 @@ class TrafficLightDQN:
                     node_dict = self.world.id2intersection[node_id_str]
                     last_phase.append(node_dict.current_phase)
                 if self.args.get_attention:
-                    actions, att_step = self.agent.get_action(last_phase, obs, test_phase=True)
+                    actions, att_step = self.agent.get_action(last_phase, obs,test_phase=True)
                     attention_mat_list.append(att_step[0])
                 else:
-                    actions = self.agent.get_action(last_phase, obs, test_phase=True)
+                    actions = self.agent.get_action(last_phase, obs,test_phase=True)
                 actions = actions
                 save_obs = np.expand_dims(obs,axis=1)
                 save_phase = np.expand_dims(last_phase,axis=1)
@@ -511,12 +547,33 @@ class TrafficLightDQN:
         log_handle.write(res + "\n")
         log_handle.close()
 
+def apply_inference(masked_state, inference_state, mask_pos):
+    masked_state[mask_pos, :] = inference_state[mask_pos, :]
+    return masked_state
 
 if __name__ == '__main__':
-    player = TrafficLightDQN(colightAgent, env, args, logger,file_prefix)
-    player.test()
-    build_relation_intersection_road(world, relation_name)
+    build_relation_intersection_road(world, relation_filename)
+    adj_mx = get_road_adj(relation_filename)
+    masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
+    with open(relation_filename, 'rb') as f_re:
+        relation = pickle.load(f_re)
+    state_name = os.path.join(args.state_dir, "rawstate_hz4x4.pkl")
 
+    inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
+                               num_for_predict, len_input, num_of_vertices)
+
+    graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
+        '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
+        mask_num) + '.pkl'
+    graph_signal_matrix_filename_dataset = graph_signal_matrix_filename.split(
+        '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
+        mask_num) + '_dataset.pkl'
+    player = TrafficLightDQN(colightAgent, env, args, logger, file_prefix, masked_pos, inference_net,
+                             graph_signal_matrix_filename_nd, graph_signal_matrix_filename_dataset)
+
+    # generate raw data in intersection format
+
+    player.train()
 
     # if args.train_model:
     #     print("begin to train model")
