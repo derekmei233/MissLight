@@ -10,8 +10,9 @@ import pickle
 
 
 def re_normalization(x, mean, std):
-    x = x * std + mean
-    return x
+    r = x[:, :, :3, :] * std + mean
+    r = np.concatenate((r, x[:, :, 3:, :]), axis=2)
+    return r
 
 
 def max_min_normalization(x, _max, _min):

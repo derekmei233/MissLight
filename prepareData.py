@@ -21,14 +21,17 @@ def normalization(train, val, test):
 
     # ensure the num of nodes is the same
     assert train.shape[1:] == val.shape[1:] and val.shape[1:] == test.shape[1:]
-    mean = train.mean(axis=(0, 1, 3), keepdims=True)
-    std = train.std(axis=(0, 1, 3), keepdims=True)
+    mean = train[:, :, :3, :].mean(axis=(0, 1, 3), keepdims=True)
+    std = train[:, :, :3, :].std(axis=(0, 1, 3), keepdims=True)
 
     print('mean.shape:', mean.shape)
     print('std.shape:', std.shape)
 
     def normalize(x):
-        return np.nan_to_num((x - mean) / std)
+        r = np.nan_to_num((x[:, :, :3, :] - mean) / std)
+        r = np.concatenate((r, x[:, :, 3:, :]), axis=2)
+        t = x[:, :, 3:, :]
+        return r
         # return (x - mean) / std
 
     train_norm = normalize(train)
@@ -727,6 +730,7 @@ def read_and_generate_dataset(graph_signal_matrix_filename,
 
 def read_output(output_file, relation_file, save_file):
     # save_len = len(save_file)
+
     num = 0
     for output in output_file:
         with open(output, 'rb') as f_op:
@@ -777,7 +781,7 @@ def reconstruct_data(data, relation_file):
     return inter_feature
 
 
-def run_preparation(mask_pos, graph_signal_matrix_filename, relation_filename, state_basedir):
+def run_preparation(mask_pos, graph_signal_matrix_filename, relation_filename, state_basedir, state_file):
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default='configurations/HZ_4x4_astgcn.conf', type=str,
                         help="configuration file path")
@@ -814,7 +818,6 @@ def run_preparation(mask_pos, graph_signal_matrix_filename, relation_filename, s
 
     # read state of intersections,convert it into state which road graph needed,save.
 
-    state_file = ['rawstate_hz4x4.pkl']
     state_file_list = [os.path.join(state_basedir, s_dic)
                        for s_dic in state_file]
     graph_signal_matrix_filename = graph_signal_matrix_filename.split(

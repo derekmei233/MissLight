@@ -409,12 +409,9 @@ class TrafficLightDQN:
 
     def train_test(self, e, state_name_list):
         obs = self.env.reset()
-        state_name = 'rawstate_hz4x4_{}.pkl'.format(e)
-        state_name_list.append(state_name)
         ep_rwds = [0 for i in range(len(self.world.intersections))]
         replay_buffer = deque(maxlen=args.replay_buffer_size)
         eps_nums = 0
-        save_state = []
         for i in range(self.args.test_steps):
             if i % args.action_interval == 0:
                 last_phase = []
@@ -433,10 +430,6 @@ class TrafficLightDQN:
                 state_t = apply_inference(state_t, state_unmasked_t, self.masked_pos)
                 replay_buffer.append((state_t, phase_t))
                 state_t = state_t.tolist()
-                save_obs = np.expand_dims(state_t, axis=1)
-                save_phase = np.expand_dims(last_phase, axis=1)
-                save_phase = np.expand_dims(save_phase, axis=1)
-                save_state.append(list(zip(save_obs, save_phase)))
                 # TODO: May need to change np to list
                 actions = self.agent.get_action(last_phase, state_t, test_phase=True)
                 actions = actions
@@ -456,20 +449,6 @@ class TrafficLightDQN:
                 eps_nums += 1
             if all(dones):
                 break
-
-        with open(os.path.join(args.state_dir, state_name), 'wb') as fo:
-            pickle.dump(save_state, fo)
-        if e % 5 == 0 or e == args.episodes - 1:
-            if len(state_name_list) > 4:
-                training_list = random.sample(state_name_list[:-1], 4)
-                training_list.append(state_name_list[-1])
-            else:
-                training_list = state_name_list
-            run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, training_list)
-            self.inference_net = train_main(self.inference_net, int(e / 5) * epochs, graph_signal_matrix_filename_dataset, relation_filename)
-            os.remove(graph_signal_matrix_filename_nd)
-            os.remove(graph_signal_matrix_filename_dataset)
-
         trv_time = self.env.eng.get_average_travel_time()
         # self.logging_tool.info("Final Travel Time is %.4f, and mean rewards %.4f" % (trv_time,mean_rwd))
         """
@@ -571,6 +550,12 @@ if __name__ == '__main__':
 
     inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
                                num_for_predict, len_input, num_of_vertices)
+    cur_epoch = 'trained'
+    logger.info("inference model type: {}".format(cur_epoch))
+    cur_param_path = os.path.join(
+        params_path, 'epoch_%s.params' % cur_epoch)
+    inference_net.load_state_dict(torch.load(cur_param_path))
+
     graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
         '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
         mask_num) + '.pkl'
@@ -582,42 +567,3 @@ if __name__ == '__main__':
 
     # generate raw data in intersection format
     player.train()
-
-    # if args.train_model:
-    #     print("begin to train model")
-    #     player.train()
-    #     player.test(True)
-    # if args.test_model:
-    #     print(args.load_model_dir)
-    #     if (not args.train_model) and (args.load_model_dir is None):
-    #         raise ValueError("invalid parameters, load_model_dir should not be None when the agent is not trained")
-    #     print("begin to test model")
-    #     player.test()
-# simulate
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
-# train(args, env)
-# test()
-# meta_test('/mnt/d/Cityflow/examples/config.json')
-
-
-# TODO: 0. first determine which sections are masked and infer them with ASTGCN model --> if construct sample for ASTGCN is posible.
-# this also means every sample in the deque is completed and filled by inference. / If NOT raise ERROR
-# 1. find index of mask
-# 2. provide mask and inference API for colight
-# 3. ASTGCN construct graph
-# 4. parameter of ASTGCN inference and exploit ASTGCN model from training process
-# 5. TODO: reward tuning.
-# 6. inference 2 t or 1 t???
-
-
-# TODO: 1. construct inference network. ASTGCN
-
-
-# TODO: 2. construct colight agent for environment
-
-# TODO: 3. during training colight. decide how to choose actions when masked. (1/2 not enought to start inference. 2/2 enough for inference
-
-# TODO: 4. finished i epoch. generate samples for ASTGCN by running test.
-
-# TODO: 5. train ASTGCN and update model to do inference in next iteration.

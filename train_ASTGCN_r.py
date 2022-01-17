@@ -135,8 +135,8 @@ def train_main(inference_net, start_epoch, graph_signal_matrix_filename, relatio
     #     masked_flag = 0
     optimizer = optim.Adam(inference_net.parameters(), lr=learning_rate)
     sw = SummaryWriter(logdir=params_path, flush_secs=5)
-    print(inference_net)
-
+    #print(inference_net)
+    """
     print('Net\'s state_dict:')
     total_param = 0
     for param_tensor in inference_net.state_dict():
@@ -147,7 +147,7 @@ def train_main(inference_net, start_epoch, graph_signal_matrix_filename, relatio
     print('Optimizer\'s state_dict:')
     for var_name in optimizer.state_dict():
         print(var_name, '\t', optimizer.state_dict()[var_name])
-
+    """
     global_step = 0
     best_epoch = 0
     best_val_loss = np.inf

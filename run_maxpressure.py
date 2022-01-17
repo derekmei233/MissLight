@@ -135,7 +135,7 @@ metric = TravelTimeMetric(world)
 env = TSCEnv(world, agents, metric)
 
 
-def generate(e, masked_pos, inference_net):
+def generate(e, masked_pos, inference_net, state_dir, state_name):
     logger.info("thread:{}, action interval:{}".format(args.thread, args.action_interval))
     env.reset()
     decision_num = 0
@@ -178,7 +178,7 @@ def generate(e, masked_pos, inference_net):
         obs, _, dones, _ = env.step(actions)
         if all(dones):
             break
-    with open(state_name, 'wb') as fo:
+    with open(os.path.join(state_dir, state_name), 'wb') as fo:
         pickle.dump(save_state, fo)
     logger.info("runtime:{}, average travel time:{}".format(e, env.eng.get_average_travel_time()))
 
@@ -218,49 +218,56 @@ if __name__ == '__main__':
     # build intersection and road net relationship
     build_relation_intersection_road(world, relation_filename)
     adj_mx = get_road_adj(relation_filename)
-    masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
+    #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
+    masked_pos = [6, 9]
+    logger.info("masked position: {}".format(masked_pos))
     with open(relation_filename, 'rb') as f_re:
         relation = pickle.load(f_re)
-
     inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
                                num_for_predict, len_input, num_of_vertices)
-    state_name = os.path.join(args.state_dir, "rawstate_hz4x4.pkl")
-    generate(0, masked_pos, inference_net)
-    # generate raw data in intersection format
     graph_signal_matrix_filename = graph_signal_matrix_filename
-    # start untrained inference and metric calculation
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir)
     graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
-        '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'.pkl'
+        '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
+        mask_num) + '.pkl'
     graph_signal_matrix_filename_dataset = graph_signal_matrix_filename.split(
-        '.')[0]+'_s'+str(points_per_hour)+'_p'+str(num_for_predict)+'_n'+str(neighbor_node)+'_m'+str(mask_num)+'_dataset.pkl'
+        '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
+        mask_num) + '_dataset.pkl'
+
+    state_name_list = []
+
+    sn_0 = "rawstate_hz4x4_0.pkl"
+    state_name_list.append(sn_0)
+    generate(0, masked_pos, inference_net, args.state_dir, sn_0)
+    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
     inference_net = train_main(inference_net, 0, graph_signal_matrix_filename_dataset, relation_filename)
 
-    os.remove(state_name)
     os.remove(graph_signal_matrix_filename_nd)
     os.remove(graph_signal_matrix_filename_dataset)
-    generate(1, masked_pos, inference_net)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir)
+    sn_1 = "rawstate_hz4x4_1.pkl"
+    state_name_list.append(sn_1)
+    generate(1, masked_pos, inference_net, args.state_dir, sn_1)
+    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
     inference_net = train_main(inference_net, epochs, graph_signal_matrix_filename_dataset, relation_filename)
 
-    os.remove(state_name)
     os.remove(graph_signal_matrix_filename_nd)
     os.remove(graph_signal_matrix_filename_dataset)
-    generate(2, masked_pos, inference_net)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir)
+    sn_2 = "rawstate_hz4x4_2.pkl"
+    generate(2, masked_pos, inference_net, args.state_dir, sn_2)
+    state_name_list.append(sn_1)
+    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
     inference_net = train_main(inference_net, 2 * epochs, graph_signal_matrix_filename_dataset, relation_filename)
 
-    os.remove(state_name)
     os.remove(graph_signal_matrix_filename_nd)
     os.remove(graph_signal_matrix_filename_dataset)
-    generate(3, masked_pos, inference_net)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir)
+    sn_3 = "rawstate_hz4x4_3.pkl"
+    generate(3, masked_pos, inference_net, args.state_dir, sn_3)
+    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
     inference_net = train_main(inference_net, 3 * epochs, graph_signal_matrix_filename_dataset, relation_filename)
 
-    os.remove(state_name)
     os.remove(graph_signal_matrix_filename_nd)
     os.remove(graph_signal_matrix_filename_dataset)
-    generate(4, masked_pos, inference_net)
+    sn_4 = "rawstate_hz4x4_4.pkl"
+    generate(4, masked_pos, inference_net, args.state_dir, sn_4)
     #inference_net = train_main(inference_net, 100, graph_signal_matrix_filename)
     #generate(2, masked_pos, inference_net)
 

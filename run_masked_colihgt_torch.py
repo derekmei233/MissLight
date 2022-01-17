@@ -1,5 +1,3 @@
-import random
-
 import gym
 from environment_colight import TSCEnv
 from world import World
@@ -48,7 +46,7 @@ parser.add_argument('--action_interval', type=int, default=10, help='how often a
 parser.add_argument('--episodes', type=int, default=200, help='training episodes')
 #parser.add_argument('--test_episodes',type=int,default=10,help='testing episodes')
 
-parser.add_argument('--load_model_dir', type=str, default="model/colight_torch/hz4x4", help='load this model to test')
+parser.add_argument('--load_model_dir', type=str, default="model/colight_torch/hz4x4",help='load this model to test')
 parser.add_argument('--graph_info_dir', type=str,default="hz4x4",help='load infos about graph(i.e. mapping, adjacent)')
 parser.add_argument('--train_model', action="store_false", default=True)
 parser.add_argument('--test_model', action="store_true", default=False)
@@ -304,7 +302,6 @@ class TrafficLightDQN:
 
     def train(self):
         total_decision_num = 0
-        state__name_list = []
         for e in range(self.args.episodes):
             last_obs = self.env.reset()  # observation dimension?
             if e % self.args.save_rate == self.args.save_rate - 1:
@@ -402,19 +399,16 @@ class TrafficLightDQN:
                 self.logging_tool.debug(
                     "intersection:{}, mean_episode_reward:{}".format(j, episodes_rewards[j] / episodes_decision_num))
             if self.args.test_when_train:
-                self.train_test(e, state_name_list=state__name_list)
+                self.train_test(e)
 
         self.agent.save_model(self.args.save_dir, prefix=args.prefix, e=self.args.episodes)
 
 
-    def train_test(self, e, state_name_list):
+    def train_test(self, e):
         obs = self.env.reset()
-        state_name = 'rawstate_hz4x4_{}.pkl'.format(e)
-        state_name_list.append(state_name)
         ep_rwds = [0 for i in range(len(self.world.intersections))]
         replay_buffer = deque(maxlen=args.replay_buffer_size)
         eps_nums = 0
-        save_state = []
         for i in range(self.args.test_steps):
             if i % args.action_interval == 0:
                 last_phase = []
@@ -433,11 +427,8 @@ class TrafficLightDQN:
                 state_t = apply_inference(state_t, state_unmasked_t, self.masked_pos)
                 replay_buffer.append((state_t, phase_t))
                 state_t = state_t.tolist()
-                save_obs = np.expand_dims(state_t, axis=1)
-                save_phase = np.expand_dims(last_phase, axis=1)
-                save_phase = np.expand_dims(save_phase, axis=1)
-                save_state.append(list(zip(save_obs, save_phase)))
                 # TODO: May need to change np to list
+
                 actions = self.agent.get_action(last_phase, state_t, test_phase=True)
                 actions = actions
                 #rewards_list = []
@@ -457,18 +448,6 @@ class TrafficLightDQN:
             if all(dones):
                 break
 
-        with open(os.path.join(args.state_dir, state_name), 'wb') as fo:
-            pickle.dump(save_state, fo)
-        if e % 5 == 0 or e == args.episodes - 1:
-            if len(state_name_list) > 4:
-                training_list = random.sample(state_name_list[:-1], 4)
-                training_list.append(state_name_list[-1])
-            else:
-                training_list = state_name_list
-            run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, training_list)
-            self.inference_net = train_main(self.inference_net, int(e / 5) * epochs, graph_signal_matrix_filename_dataset, relation_filename)
-            os.remove(graph_signal_matrix_filename_nd)
-            os.remove(graph_signal_matrix_filename_dataset)
 
         trv_time = self.env.eng.get_average_travel_time()
         # self.logging_tool.info("Final Travel Time is %.4f, and mean rewards %.4f" % (trv_time,mean_rwd))
@@ -512,11 +491,7 @@ class TrafficLightDQN:
                 else:
                     actions = self.agent.get_action(last_phase, obs,test_phase=True)
                 actions = actions
-                save_obs = np.expand_dims(obs, axis=1)
-                save_phase = np.expand_dims(last_phase, axis=1)
-                save_phase = np.expand_dims(save_phase, axis=1)
-                # save_obs = np.expand_dims(list(zip(save_obs,save_phase)),axis=0)
-                save_state.append(list(zip(save_obs, save_phase)))
+                save_obs = np.expand_dims(obs,axis=1)
                 rewards_list = []
 
                 for _ in range(self.args.action_interval):
@@ -541,9 +516,7 @@ class TrafficLightDQN:
             att_file = "data/analysis/colight/"+tmpstr+"_att_ana.pkl"
             pickle.dump(attention_mat_list,open(att_file,"wb"))
             print("dump the attention matrix to ",att_file)
-        with open(state_name, 'wb') as fo:
-            pickle.dump(save_state, fo)
-        print("save raw state done")
+
         return trv_time
 
     def writeLog(self, mode, step, travel_time, loss, cur_rwd):
@@ -563,14 +536,14 @@ def apply_inference(masked_state, inference_state, mask_pos):
 if __name__ == '__main__':
     build_relation_intersection_road(world, relation_filename)
     adj_mx = get_road_adj(relation_filename)
-    #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
-    masked_pos = [5, 10]
-    logger.info("masked position: {}".format(masked_pos))
+    masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
     with open(relation_filename, 'rb') as f_re:
         relation = pickle.load(f_re)
+    state_name = os.path.join(args.state_dir, "rawstate_hz4x4.pkl")
 
     inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
                                num_for_predict, len_input, num_of_vertices)
+
     graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
         '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
         mask_num) + '.pkl'
@@ -581,43 +554,5 @@ if __name__ == '__main__':
                              graph_signal_matrix_filename_nd, graph_signal_matrix_filename_dataset)
 
     # generate raw data in intersection format
+
     player.train()
-
-    # if args.train_model:
-    #     print("begin to train model")
-    #     player.train()
-    #     player.test(True)
-    # if args.test_model:
-    #     print(args.load_model_dir)
-    #     if (not args.train_model) and (args.load_model_dir is None):
-    #         raise ValueError("invalid parameters, load_model_dir should not be None when the agent is not trained")
-    #     print("begin to test model")
-    #     player.test()
-# simulate
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
-# train(args, env)
-# test()
-# meta_test('/mnt/d/Cityflow/examples/config.json')
-
-
-# TODO: 0. first determine which sections are masked and infer them with ASTGCN model --> if construct sample for ASTGCN is posible.
-# this also means every sample in the deque is completed and filled by inference. / If NOT raise ERROR
-# 1. find index of mask
-# 2. provide mask and inference API for colight
-# 3. ASTGCN construct graph
-# 4. parameter of ASTGCN inference and exploit ASTGCN model from training process
-# 5. TODO: reward tuning.
-# 6. inference 2 t or 1 t???
-
-
-# TODO: 1. construct inference network. ASTGCN
-
-
-# TODO: 2. construct colight agent for environment
-
-# TODO: 3. during training colight. decide how to choose actions when masked. (1/2 not enought to start inference. 2/2 enough for inference
-
-# TODO: 4. finished i epoch. generate samples for ASTGCN by running test.
-
-# TODO: 5. train ASTGCN and update model to do inference in next iteration.
