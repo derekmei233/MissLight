@@ -219,10 +219,12 @@ if __name__ == '__main__':
     build_relation_intersection_road(world, relation_filename)
     adj_mx = get_road_adj(relation_filename)
     #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
-    masked_pos = [6, 9]
+    masked_pos = [1, 6]
     logger.info("masked position: {}".format(masked_pos))
     with open(relation_filename, 'rb') as f_re:
         relation = pickle.load(f_re)
+    # tell its for uniform test
+    logger.info("uniform test")
     inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
                                num_for_predict, len_input, num_of_vertices)
     graph_signal_matrix_filename = graph_signal_matrix_filename

@@ -429,7 +429,7 @@ class TrafficLightDQN:
 
 if __name__ == '__main__':
     player = TrafficLightDQN(colightAgent, env, args, logger,file_prefix)
-    player.test()
+    player.train()
     build_relation_intersection_road(world, relation_name)
     # if args.train_model:
     #     print("begin to train model")

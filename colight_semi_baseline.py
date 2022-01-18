@@ -550,12 +550,13 @@ if __name__ == '__main__':
 
     inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
                                num_for_predict, len_input, num_of_vertices)
-    cur_epoch = 'trained'
+    cur_epoch = 'untrained'
     logger.info("inference model type: {}".format(cur_epoch))
+    """
     cur_param_path = os.path.join(
         params_path, 'epoch_%s.params' % cur_epoch)
     inference_net.load_state_dict(torch.load(cur_param_path))
-
+    """
     graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
         '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
         mask_num) + '.pkl'

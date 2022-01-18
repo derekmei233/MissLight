@@ -566,6 +566,7 @@ if __name__ == '__main__':
     #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
     masked_pos = [5, 10]
     logger.info("masked position: {}".format(masked_pos))
+    #logger.info("uniform test")
     with open(relation_filename, 'rb') as f_re:
         relation = pickle.load(f_re)
 
