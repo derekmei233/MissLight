@@ -1,5 +1,4 @@
 import random
-
 import gym
 from environment_colight import TSCEnv
 from world import World
@@ -45,7 +44,7 @@ parser.add_argument('-me', '--min_epsilon', type=float, default=0.01, help="the 
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')  #per episodes
 parser.add_argument('--test_steps', type=int, default=3600, help='number of steps for step')
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
-parser.add_argument('--episodes', type=int, default=200, help='training episodes')
+parser.add_argument('--episodes', type=int, default=60, help='training episodes')
 #parser.add_argument('--test_episodes',type=int,default=10,help='testing episodes')
 
 parser.add_argument('--load_model_dir', type=str, default="model/colight_torch/hz4x4", help='load this model to test')
@@ -304,7 +303,8 @@ class TrafficLightDQN:
 
     def train(self):
         total_decision_num = 0
-        state__name_list = []
+        state_name_list = []
+        avg_time_list = []
         for e in range(self.args.episodes):
             last_obs = self.env.reset()  # observation dimension?
             if e % self.args.save_rate == self.args.save_rate - 1:
@@ -402,15 +402,17 @@ class TrafficLightDQN:
                 self.logging_tool.debug(
                     "intersection:{}, mean_episode_reward:{}".format(j, episodes_rewards[j] / episodes_decision_num))
             if self.args.test_when_train:
-                self.train_test(e, state_name_list=state__name_list)
+                self.train_test(e, state_name_list=state_name_list, avg_time_list=avg_time_list)
+                print(state_name_list[-5:])
+                print(avg_time_list[-5:])
 
         self.agent.save_model(self.args.save_dir, prefix=args.prefix, e=self.args.episodes)
 
 
-    def train_test(self, e, state_name_list):
+    def train_test(self, e, state_name_list, avg_time_list):
         obs = self.env.reset()
         state_name = 'rawstate_hz4x4_{}.pkl'.format(e)
-        state_name_list.append(state_name)
+
         ep_rwds = [0 for i in range(len(self.world.intersections))]
         replay_buffer = deque(maxlen=args.replay_buffer_size)
         eps_nums = 0
@@ -457,12 +459,28 @@ class TrafficLightDQN:
             if all(dones):
                 break
 
+        trv_time = self.env.eng.get_average_travel_time()
+        if not avg_time_list:
+            avg_time_list.append(trv_time)
+            state_name_list.append(state_name)
+        else:
+            flag = 0
+            for idx, t in enumerate(avg_time_list):
+                if trv_time > t:
+                    avg_time_list.insert(idx, trv_time)
+                    state_name_list.insert(idx, state_name)
+                    flag = 1
+                    break
+            if flag == 0:
+                avg_time_list.append(trv_time)
+                state_name_list.append(state_name)
+
         with open(os.path.join(args.state_dir, state_name), 'wb') as fo:
             pickle.dump(save_state, fo)
+
         if e % 5 == 0 or e == args.episodes - 1:
             if len(state_name_list) > 4:
-                training_list = random.sample(state_name_list[:-1], 4)
-                training_list.append(state_name_list[-1])
+                training_list = random.sample(state_name_list[-10:], 5)
             else:
                 training_list = state_name_list
             run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, training_list)
@@ -470,7 +488,6 @@ class TrafficLightDQN:
             os.remove(graph_signal_matrix_filename_nd)
             os.remove(graph_signal_matrix_filename_dataset)
 
-        trv_time = self.env.eng.get_average_travel_time()
         # self.logging_tool.info("Final Travel Time is %.4f, and mean rewards %.4f" % (trv_time,mean_rwd))
         """
         self.logging_tool.info(

@@ -45,7 +45,7 @@ parser.add_argument('-me', '--min_epsilon', type=float, default=0.01, help="the 
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')  #per episodes
 parser.add_argument('--test_steps', type=int, default=3600, help='number of steps for step')
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
-parser.add_argument('--episodes', type=int, default=200, help='training episodes')
+parser.add_argument('--episodes', type=int, default=60, help='training episodes')
 #parser.add_argument('--test_episodes',type=int,default=10,help='testing episodes')
 
 parser.add_argument('--load_model_dir', type=str, default="model/colight_torch/hz4x4", help='load this model to test')

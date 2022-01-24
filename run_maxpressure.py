@@ -219,7 +219,7 @@ if __name__ == '__main__':
     build_relation_intersection_road(world, relation_filename)
     adj_mx = get_road_adj(relation_filename)
     #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
-    masked_pos = [1, 6]
+    masked_pos = [5, 10]
     logger.info("masked position: {}".format(masked_pos))
     with open(relation_filename, 'rb') as f_re:
         relation = pickle.load(f_re)
