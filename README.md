@@ -1,3 +1,6 @@
+# Easypredict
+New code base for temporary pre experiments
+
 # Road Graph
 |File name|Note|
 |--|--|
@@ -11,16 +14,4 @@ state_4x4.pkl|transform data's format from raw data to astgcn model's data |
 2. The settings for each experiments are given in the "configurations" folder.
 
 # Run Code
-1. generate roadnet_relation.pkl and rawstate.pkl 
-```
-python run_simple_dqn.py --config cityflow_hz_4x4.cfg
-```
 
-2. generate train,val,test data which prediction model needed
-```
-python prepareData.py --config configurations/HZ_4x4_astgcn.conf
-```
-3. train and test prediction model
-```
-python train_ASTGCN_r.py --config configurations/HZ_4x4_astgcn.conf
-```
