@@ -14,4 +14,11 @@ state_4x4.pkl|transform data's format from raw data to astgcn model's data |
 2. The settings for each experiments are given in the "configurations" folder.
 
 # Run Code
-
+1. generate roadnet_relation.pkl and rawstate.pkl 
+```
+python run_simple_dqn.py --config cityflow_hz_4x4.cfg
+```
+2. run experiment
+```
+python run_maxpressure.py
+```
