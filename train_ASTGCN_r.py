@@ -46,8 +46,10 @@ model_name = training_config['model_name']
 ctx = training_config['ctx']
 os.environ["CUDA_VISIBLE_DEVICES"] = ctx
 USE_CUDA = torch.cuda.is_available()
-DEVICE = torch.device('cuda:0')
-print("CUDA:", USE_CUDA, DEVICE)
+if USE_CUDA:
+    DEVICE = torch.device('cuda:0')
+else:
+    DEVICE = torch.device('cpu')
 
 learning_rate = float(training_config['learning_rate'])
 epochs = int(training_config['epochs'])
@@ -134,7 +136,7 @@ def train_main(inference_net, start_epoch, graph_signal_matrix_filename, relatio
     #     criterion = nn.MSELoss().to(DEVICE)
     #     masked_flag = 0
     optimizer = optim.Adam(inference_net.parameters(), lr=learning_rate)
-    sw = SummaryWriter(logdir=params_path, flush_secs=5)
+    sw = SummaryWriter(log_dir=params_path, flush_secs=5)
     #print(inference_net)
     """
     print('Net\'s state_dict:')

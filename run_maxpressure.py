@@ -24,6 +24,7 @@ from metric.metrics import masked_mse
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import random
 
 
 # parse args
@@ -64,7 +65,10 @@ model_name = training_config['model_name']
 ctx = training_config['ctx']
 os.environ["CUDA_VISIBLE_DEVICES"] = ctx
 USE_CUDA = torch.cuda.is_available()
-DEVICE = torch.device('cuda:0')
+if USE_CUDA:
+    DEVICE = torch.device('cuda:0')
+else:
+    DEVICE = torch.device('cpu')
 print("CUDA:", USE_CUDA, DEVICE)
 
 learning_rate = float(training_config['learning_rate'])
@@ -182,13 +186,48 @@ def generate(e, masked_pos, inference_net, state_dir, state_name):
         pickle.dump(save_state, fo)
     logger.info("runtime:{}, average travel time:{}".format(e, env.eng.get_average_travel_time()))
 
+def plan(e, masked_pos, tmp_action):
+    logger.info("thread:{}, action interval:{}".format(args.thread, args.action_interval))
+    env.reset()
+    decision_num = 0
+    save_state = []
+    for s in range(args.test_steps):
+        if s % args.action_interval == 0:
+            states = []
+            phases = []
+            for j in agents:
+                state = j.get_ob()
+                phase = j.get_phase()
+                states.append(state)
+                phases.append(phase)
 
+            # generate state_mask
+            state_t = np.array(states, dtype=np.float32)
+            phase_t = np.array(phases, dtype=np.int8)
+            actions = []
+            for idx, I in enumerate(agents):
+                if idx not in masked_pos:
+                    action = I.get_action_org(state_t)
+                    actions.append(action)
+                else:
+                    if s % 30 == 0:
+                        action = (tmp_action[idx] + 1) % action_space.n
+                        tmp_action[idx] = action
+                        actions.append(action)
+                    else:
+                        action = tmp_action[idx]
+                        actions.append(action)
+
+        #if s % 30 == 0: print(actions)
+        obs, _, dones, _ = env.step(actions)
+        if all(dones):
+            break
+    logger.info("runtime:{}, average travel time:{}".format(e, env.eng.get_average_travel_time()))
 
 
 def run(args, env):
     logger.info("thread:{}, acton interval:{}".format(args.thread, args.action_interval))
     for e in range(1):
-
         last_obs = env.reset()
         env.eng.set_save_replay(True)
         env.eng.set_replay_file("replay_%s.txt" % e)
@@ -215,65 +254,49 @@ def apply_inference(masked_state, inference_state, mask_pos):
     return masked_state
 
 if __name__ == '__main__':
-    # build intersection and road net relationship
-    build_relation_intersection_road(world, relation_filename)
-    adj_mx = get_road_adj(relation_filename)
-    #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
-    masked_pos = [5, 10]
-    logger.info("masked position: {}".format(masked_pos))
-    with open(relation_filename, 'rb') as f_re:
-        relation = pickle.load(f_re)
-    # tell its for uniform test
-    logger.info("uniform test")
-    inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
-                               num_for_predict, len_input, num_of_vertices)
-    graph_signal_matrix_filename = graph_signal_matrix_filename
-    graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
-        '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
-        mask_num) + '.pkl'
-    graph_signal_matrix_filename_dataset = graph_signal_matrix_filename.split(
-        '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
-        mask_num) + '_dataset.pkl'
+    test = []
+    for i in test:
+        masked_pos = random.sample(range(16), i)
+        tmp_action = {idx: -1 for idx in range(16) if idx in masked_pos}
+        # build intersection and road net relationship
+        build_relation_intersection_road(world, relation_filename)
+        adj_mx = get_road_adj(relation_filename)
+        #masked_pos = get_mask_pos(relation_filename, neighbor_node, mask_num)
 
-    state_name_list = []
+        # masked position
 
-    sn_0 = "rawstate_hz4x4_0.pkl"
-    state_name_list.append(sn_0)
-    generate(0, masked_pos, inference_net, args.state_dir, sn_0)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
-    inference_net = train_main(inference_net, 0, graph_signal_matrix_filename_dataset, relation_filename)
+        logger.info("masked position: {}".format(masked_pos))
+        with open(relation_filename, 'rb') as f_re:
+            relation = pickle.load(f_re)
+        # tell its for uniform test
+        logger.info("Maxpressure")
+        inference_net = make_model(DEVICE, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, time_strides, adj_mx,
+                                    num_for_predict, len_input, num_of_vertices)
+        graph_signal_matrix_filename = graph_signal_matrix_filename
+        graph_signal_matrix_filename_nd = graph_signal_matrix_filename.split(
+            '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
+            mask_num) + '.pkl'
+        graph_signal_matrix_filename_dataset = graph_signal_matrix_filename.split(
+            '.')[0] + '_s' + str(points_per_hour) + '_p' + str(num_for_predict) + '_n' + str(neighbor_node) + '_m' + str(
+            mask_num) + '_dataset.pkl'
 
-    os.remove(graph_signal_matrix_filename_nd)
-    os.remove(graph_signal_matrix_filename_dataset)
-    sn_1 = "rawstate_hz4x4_1.pkl"
-    state_name_list.append(sn_1)
-    generate(1, masked_pos, inference_net, args.state_dir, sn_1)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
-    inference_net = train_main(inference_net, epochs, graph_signal_matrix_filename_dataset, relation_filename)
+        state_name_list = []
 
-    os.remove(graph_signal_matrix_filename_nd)
-    os.remove(graph_signal_matrix_filename_dataset)
-    sn_2 = "rawstate_hz4x4_2.pkl"
-    generate(2, masked_pos, inference_net, args.state_dir, sn_2)
-    state_name_list.append(sn_1)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
-    inference_net = train_main(inference_net, 2 * epochs, graph_signal_matrix_filename_dataset, relation_filename)
+        sn_0 = "rawstate_hz4x4_0.pkl"
+        state_name_list.append(sn_0)
+        generate(0, masked_pos, inference_net, args.state_dir, sn_0)
+        run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list)
+        inference_net = train_main(inference_net, 0, graph_signal_matrix_filename_dataset, relation_filename)
 
-    os.remove(graph_signal_matrix_filename_nd)
-    os.remove(graph_signal_matrix_filename_dataset)
-    sn_3 = "rawstate_hz4x4_3.pkl"
-    generate(3, masked_pos, inference_net, args.state_dir, sn_3)
-    run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list[-3:])
-    inference_net = train_main(inference_net, 3 * epochs, graph_signal_matrix_filename_dataset, relation_filename)
+        os.remove(graph_signal_matrix_filename_nd)
+        os.remove(graph_signal_matrix_filename_dataset)
+        sn_1 = "rawstate_hz4x4_1.pkl"
+        state_name_list.append(sn_1)
+        generate(1, masked_pos, inference_net, args.state_dir, sn_1)
 
-    os.remove(graph_signal_matrix_filename_nd)
-    os.remove(graph_signal_matrix_filename_dataset)
-    sn_4 = "rawstate_hz4x4_4.pkl"
-    generate(4, masked_pos, inference_net, args.state_dir, sn_4)
-    #inference_net = train_main(inference_net, 100, graph_signal_matrix_filename)
-    #generate(2, masked_pos, inference_net)
-
-
-
-
-
+        logger.info("Maxpressure&FixedTime")
+        plan(0, masked_pos, tmp_action)
+    masked_pos = list(range(16))
+    tmp_action = {idx: -1 for idx in range(16) if idx in masked_pos}
+    logger.info("Maxpressure&FixedTime")
+    plan(0, masked_pos, tmp_action)
