@@ -15,6 +15,7 @@ from utils import *
 import pickle
 from prepareData import build_relation_intersection_road, inter2state, reconstruct_data, run_preparation
 from predictionModel.ASTGCN_r import make_model
+from preidctionModel.
 from prepareData import load_graphdata_channel, get_road_adj, read_output, get_mask_pos
 from train_ASTGCN_r import train_main
 
@@ -29,8 +30,8 @@ import random
 
 # parse args
 parser = argparse.ArgumentParser(description='Run Example')
-parser.add_argument('--config_file', type=str, default='cityflow_hz_4x4.cfg', help='path of config file')
-parser.add_argument("--config", default='configurations/HZ_4x4_astgcn.conf', type=str,
+parser.add_argument('--config_file', type=str, default='cityflow_hz4x4.cfg', help='path of config file')
+parser.add_argument("--config", default='configurations/hz4x4_astgcn.conf', type=str,
                     help="configuration file path")
 parser.add_argument('--thread', type=int, default=1, help='number of threads')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
@@ -229,7 +230,7 @@ def run(args, env):
     logger.info("thread:{}, acton interval:{}".format(args.thread, args.action_interval))
     for e in range(1):
         last_obs = env.reset()
-        env.eng.set_save_replay(True)
+        env.eng.set_save_replay(False)
         env.eng.set_replay_file("replay_%s.txt" % e)
 
         i = 0
@@ -265,7 +266,7 @@ if __name__ == '__main__':
     to see the optimization result. 
     """
     
-    test = [1,2,3,4]
+    test = [2]
     for i in test:
         # assign masked position by random sampling from 4x4 network
         masked_pos = random.sample(range(16), i)
@@ -297,8 +298,8 @@ if __name__ == '__main__':
         run_preparation(masked_pos, graph_signal_matrix_filename, relation_filename, args.state_dir, state_name_list)
         inference_net = train_main(inference_net, 0, graph_signal_matrix_filename_dataset, relation_filename)
         # this is the experiment of untrained inference net.
-        os.remove(graph_signal_matrix_filename_nd)
-        os.remove(graph_signal_matrix_filename_dataset)
+        #os.remove(graph_signal_matrix_filename_nd)
+        #os.remove(graph_signal_matrix_filename_dataset)
         sn_1 = "rawstate_hz4x4_1.pkl"
         state_name_list.append(sn_1)
         generate(1, masked_pos, inference_net, args.state_dir, sn_1)

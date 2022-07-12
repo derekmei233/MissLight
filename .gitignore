@@ -12,3 +12,4 @@ data/frontend/
 venv/
 data/replay_dir/
 .vscode
+data/output_data

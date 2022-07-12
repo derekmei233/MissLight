@@ -21,7 +21,7 @@ class MaxPressureAgent(BaseAgent):
     def get_ob(self):
         if self.ob_generator is not None:
             obs_lane = self.ob_generator[0].generate()
-            return obs_lane
+            return obs_lane, [-1]
         else:
             return None
 
@@ -52,14 +52,14 @@ class MaxPressureAgent(BaseAgent):
         return action
     """
     # inference version
-    def get_action(self, obs, relation, in_channels):
+    def get_action(self, obs, phase, relation):
         # get lane pressure
         #lvc_1 = self.world.get_info("lane_count")
         inter_dict_id2inter = relation['inter_dict_id2inter']
         inter_in_roads = relation['inter_in_roads']
         road_dict_road2id = relation['road_dict_road2id']
         num_roads = len(road_dict_road2id)
-        lvc = np.zeros((num_roads, in_channels - 8), dtype=np.float32)
+        lvc = np.zeros((num_roads, 3), dtype=np.float32)
         # TODO : double check its reversed or not. yes its reversed
         for id_node, ob_length in enumerate(obs):
             direction = []

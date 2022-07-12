@@ -104,6 +104,7 @@ def build_relation_intersection_road(world, save_dir):
         pickle.dump(net_info, fo)
 
     print("save relation done")
+    return net_info
 
 
 def load_graphdata_channel(graph_signal_matrix_filename, num_of_hours, num_of_days, num_of_weeks, DEVICE, batch_size, shuffle=True):
@@ -727,7 +728,6 @@ def read_and_generate_dataset(graph_signal_matrix_filename,
             pickle.dump(dataset_info, fw)
     return all_data
 
-
 def read_output(output_file, relation_file, save_file):
     # save_len = len(save_file)
 
@@ -780,10 +780,50 @@ def reconstruct_data(data, relation_file):
                       ] = np.concatenate([N, E, S, W], axis=3)
     return inter_feature
 
+def mask_op(data_or, mask_matrix, adj_matrix, data_construct):
+    '''
+    :param data:(B,N,F,T)
+    :param mask_matrix:(N,)
+    :param adj_matrix:(N,N)
+    :param data_construct:select or random
+    :return:(B,N,F,T)
+    '''
+    if data_construct == 'select':
+        for mask_id, value in enumerate(mask_matrix):
+            if value != 1:
+                neighbors = []
+                for col_id, x in enumerate(adj_matrix[:, mask_id]):
+                    if x == 1.:
+                        neighbors.append(col_id)
+                neighbor_all = np.zeros_like(data_or[:, 0, :3])
+                if len(neighbors) != 0:
+                    for node in neighbors:
+                        neighbor_all = data_or[:, node, :3] + neighbor_all
+                    data_or[:, mask_id, :3] = neighbor_all / len(neighbors)
+                else:
+                    rand_id = random.randint(0, len(mask_matrix)-1)
+                    while mask_matrix[rand_id] != 1:
+                        rand_id = random.randint(0, len(mask_matrix)-1)
+                    data_or[:,mask_id, :3] = data_or[:,rand_id, :3]
+                if value == 0:
+                    # set virtual node's phase
+                    rand_id = random.sample(neighbors, 1)[0]
+                    data_or[:, mask_id, 3:] = data_or[:, rand_id, 3:]
+    else:
+        for mask_id, value in enumerate(mask_matrix):
+            if value != 1:
+                rand_id = random.randint(0, len(mask_matrix)-1)
+                while mask_matrix[rand_id] != 1:
+                    rand_id = random.randint(0, len(mask_matrix)-1)
+                data_or[:,mask_id, :3] = data_or[:,rand_id, :3]
+                if value == 0:
+                    data_or[:,mask_id, 3:] = data_or[:,rand_id, 3:]
+    return data_or
 
-def run_preparation(mask_pos, graph_signal_matrix_filename, relation_filename, state_basedir, state_file):
+
+def run_preparation(mask_pos, graph_signal_matrix_filename, relation_filename, state_file):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default='configurations/HZ_4x4_astgcn.conf', type=str,
+    parser.add_argument("--config", default='configurations/hz4x4_astgcn.conf', type=str,
                         help="configuration file path")
     args = parser.parse_args()
     config = configparser.ConfigParser()

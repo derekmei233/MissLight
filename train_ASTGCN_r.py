@@ -17,7 +17,7 @@ from metric.metrics import masked_mse
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config", default='configurations/HZ_4x4_astgcn.conf', type=str,
+parser.add_argument("--config", default='configurations/hz4x4_astgcn.conf', type=str,
                     help="configuration file path")
 args = parser.parse_args()
 config = configparser.ConfigParser()
