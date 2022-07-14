@@ -44,7 +44,7 @@ class DQNAgent(RLAgent):
         self.ob_length = sum(ob_length)
 
         self.memory = deque(maxlen=4000)
-        self.learning_start = 50
+        self.learning_start = 1000
         self.update_model_freq = 1
         self.update_target_model_freq = 20
         self.gamma = 0.95  # discount rate

@@ -27,8 +27,8 @@ parser.add_argument('--episodes', type=int, default=100, help='training episodes
 parser.add_argument('--save_dir', type=str, default="model", help='directory in which model should be saved')
 parser.add_argument('--state_dir', type=str, default="state", help='directory in which state and road file should be saved')
 parser.add_argument('--log_dir', type=str, default='logging', help='directory in which logging information should be saved')
-parser.add_argument('--prefix', type=str, default="0", help='root path of the logging folder')
-parser.add_argument('--load_model', type=bool, default=True, help='directory from which to load model, None if not load')
+parser.add_argument('--prefix', type=str, default="1", help='root path of the logging folder')
+parser.add_argument('--load_model', type=bool, default=False, help='directory from which to load model, None if not load')
 
 args = parser.parse_args()
 
@@ -166,17 +166,23 @@ def dqn_train(env, agents):
     return agents
 
 def dqn_generate(env, agents, raw_state):
+    # self.env.eng.set_save_replay(True)
+    if not os.path.exists(self.replay_file_dir):
+        os.makedirs(self.replay_file_dir)
+    # self.env.eng.set_replay_file(self.replay_file_dir + f"/episode_{e}.txt")
     save_state = []
     obs = env.reset()
+    cur_obs, cur_phases = list(zip(*obs))
     for agent in agents:
         agent.load_model(model_dir, -1)
     for i in range(args.steps):
         if i % args.action_interval == 0:
             actions = []
             for agent_id, agent in enumerate(agents):
-                actions.append(agent.get_action(obs[agent_id]))
+                actions.append(agent.get_action(cur_obs, cur_phases))
             save_state.append(obs)
         obs, rewards, dones, info = env.step(actions)
+        cur_obs, cur_phases = list(zip(*obs))
         
         if all(dones):
             break
@@ -322,9 +328,9 @@ def agents_train_test(e, env, agents, inference_net, mask_pos, relation, mask_ma
 
 
 if __name__ == '__main__':
-    mask_num = [1,1,1,2,2,2,3,3,3]
+    mask_num = [3,3,3]
     generate_choose = 'IDQN'
-    infer_choose = ['sfm', 'no']  # ['no', 'sfm', 'net']
+    infer_choose = ['net', 'sfm', 'no']  # ['no', 'sfm', 'net']
     control_choose = ['maxpressure', 'CopyDQN', 'IDQN']  #['maxpressure', 'SDQN', 'IDQN', 'MaskSDQN', 'MaskIDQN', 'CopyDQN']
     
     config_file = f'cityflow_{args.config}.cfg'
@@ -336,6 +342,20 @@ if __name__ == '__main__':
     # create relation
     relation = build_relation(world)
 
+
+    if 'net' in infer_choose:
+        # need a dataset to train infer net
+        # Right now support IDQN generation
+        # store last model at epoch -1
+        generate_agents = create_preparation_agents(world)
+        generate_env = create_env(world, generate_agents)
+        if args.load_model:
+            for i, ag in enumerate(generate_agents):
+                ag.load_model(model_dir, -1)
+        else:
+            # train dqn agents here
+            generate_agents = dqn_train(generate_env, generate_agents)
+
     for mask in mask_num:
         mask_pos = random.sample(range(np.product(relation['net_shape'])), mask)
         adj_matrix = get_road_adj(relation)   
@@ -345,23 +365,12 @@ if __name__ == '__main__':
         logger.info(f'mask_pos = {mask_pos}')
         for infer in infer_choose:
             if infer == 'net':
-                # need a dataset to train infer net
-                # Right now support IDQN generation
-                # store last model at epoch -1
-                agents = create_preparation_agents(world)
-                env = create_env(world, agents)
-                if args.load_model:
-                    for i, ag in enumerate(agents):
-                        ag.load_model(model_dir, -1)
-                else:
-                    # train dqn agents here
-                    agents = dqn_train(env, agents)
                 # generate dataset here
-                raw_state_name = dqn_generate(env, agents, f'raw_state_{generate_choose}')
+                raw_state_name = dqn_generate(generate_env, generate_agents, f'raw_state_{generate_choose}')
                 state_file = [raw_state_name]
                 run_preparation(configuration, mask_pos, graph_signal_matrix_filename, relation, state_file)
-
                 # train network then start agent training or planning
+
 
             elif infer == 'sfm':
                 inference_net = SFM_predictor().make_model()
