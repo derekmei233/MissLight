@@ -37,9 +37,7 @@ class TSCEnv(gym.Env):
 
     def step(self, actions):
         assert len(actions) == self.n_agents
-
         self.world.step(actions)
-
         obs = [agent.get_ob() for agent in self.agents]
         rewards = [agent.get_reward() for agent in self.agents]
         dones = [False] * self.n_agents
