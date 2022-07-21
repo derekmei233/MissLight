@@ -15,7 +15,6 @@ import pickle
 from utils.preparation import build_relation, get_road_adj, run_preparation, get_mask_matrix
 from predictionModel.SFM import SFM_predictor
 
-
 parser = argparse.ArgumentParser(description='DQN control test')
 parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
@@ -55,8 +54,10 @@ sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
 
-
 def create_preparation_agents(world):
+    '''
+    Use this function to create agent for later data generation, generated data will later be used in the inference model training
+    '''
     agents = []
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
@@ -75,6 +76,9 @@ def create_preparation_agents(world):
     return agents
 
 def create_agents(world, control, mask_pos):
+    '''
+    Use this function to create agent for optimization
+    '''
     agents = []
     if control == 'maxpressure':
         for idx, inter in enumerate(world.intersections):
@@ -184,6 +188,9 @@ def create_env(world, agents):
     return TSCEnv(world, agents, None)
 
 def idqn_train(env, agents):
+    '''
+    Use this function to train idqn and then use it to generate data. Generated data will be used in inference model training
+    '''
     total_decision_num = 0
     for e in range(args.episodes):
         last_obs = env.reset()
@@ -235,6 +242,9 @@ def idqn_train(env, agents):
     return agents
 
 def idqn_generate(env, agents, raw_state):
+    '''
+    Use trained model returned by idqn_train to generate data.
+    '''
     env.eng.set_save_replay(False)
     if not os.path.exists(replay_dir):
         os.makedirs(replay_dir)
@@ -265,6 +275,9 @@ def idqn_generate(env, agents, raw_state):
     return raw_state_name
 
 def agent_plan(env, agents, inference_net, mask_pos, relation, mask_matrix, adj_matrix):
+    '''
+    Use trained model and fixedtime agent to optimize traffic light control
+    '''
     logger.info("thread:{}, action interval:{}".format(8, args.action_interval))
     env.reset()
     decision_num = 0
@@ -311,6 +324,10 @@ def agent_plan(env, agents, inference_net, mask_pos, relation, mask_matrix, adj_
     logger.info('-----------------------------------------------------')
 
 def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_matrix, adj_matrix):
+
+    '''
+    train dqn with inference data to optimize traffic light control
+    '''
     # for IDQN training
     total_decision_num = 0
     best_att = np.inf
@@ -416,6 +433,9 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
 
 
 def agents_train_test(e, env, agents, inference_net, infer, mask_pos, relation, mask_matrix, adj_matrix, best_att):
+    '''
+    test current idqn agents to get traffic light control task result(no exploration)
+    '''
     total_decision_num = 0
     cur_obs, cur_phases = list(zip(*env.reset()))
     cur_obs = np.array(cur_obs, dtype=np.float32)
@@ -478,6 +498,9 @@ def agents_train_test(e, env, agents, inference_net, infer, mask_pos, relation, 
     return best_att
 
 def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method='all'):
+    '''
+    same as function agents_train but ued for shared agents
+    '''
     # for SDQN training, difference exists in create_agents() and agents.replay()
     if control == 'MaskSDQN':
         zero_idx = min(mask_pos)
@@ -551,9 +574,12 @@ def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, re
                 break
         logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         best_att = shared_agents_train_test(e, env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method, best_att)
-        logger.info('-----------------------------------------------------')
+    logger.info('-----------------------------------------------------')
 
 def shared_agents_train_test(e, env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method, best_att):
+    '''
+    same as function agents_test but ued for shared agents
+    '''
     total_decision_num = 0
     cur_obs, cur_phases = list(zip(*env.reset()))
     cur_obs = np.array(cur_obs, dtype=np.float32)
@@ -588,10 +614,11 @@ def shared_agents_train_test(e, env, agents, inference_net, infer, control, mask
     return best_att  
 
 if __name__ == '__main__':
-    mask_num = [4]
+    random.seed(11)
+    mask_num = [1,1,1,2,2,2,3,3,3,4,4,4]
     generate_choose = 'IDQN'
-    infer_choose = ['net', 'sfm', 'no']  # ['net', 'sfm', 'no']
-    control_choose = ['IDQN', 'SDQN', 'MaskSDQN']  # ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']
+    infer_choose = ['sfm', 'no']  # ['net', 'sfm', 'no']
+    control_choose = ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']  # ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']
     
     config_file = f'cityflow_{args.config}.cfg'
     configuration = f'configurations/{args.config}_astgcn.conf'
@@ -657,6 +684,9 @@ if __name__ == '__main__':
                         sample_method = 'all'
                         logger.info(f'infer = {infer}, control = {control}, sample_method = {sample_method}')
                         shared_agents_train(env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method)
+                        # need new environment and agents 
+                        agents = create_agents(world, control, mask_pos)
+                        env = create_env(world, agents)
                         sample_method = 'unmask'
                         logger.info(f'infer = {infer}, control = {control}, sample_method = {sample_method}')
                         shared_agents_train(env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method)

@@ -142,13 +142,10 @@ class SDQNAgent(RLAgent):
             target_f[i][action] = target[i]
         loss = self.criterion(self.model.forward(obs, train=True), target_f)
         if self.idx == self.zero_idx:
-            print(f'{self.idx} zero')
             self.optimizer.zero_grad()
         loss.backward()
-        print(f'{self.idx} backward')
         if self.idx == self.update_idx:
             self.optimizer.step()
-            print(f'{self.idx} update')
             if self.epsilon > self.epsilon_min:
                 self.epsilon *= self.epsilon_decay
 
