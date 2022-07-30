@@ -1,0 +1,8 @@
+#! /bin/bash
+#SBATCH -n 8
+#SBATCH -p public
+#SBATCH -N 1
+
+
+source ~/miniconda3/bin/activate ~/miniconda3/envs/libsignal
+python dqn_control_reward.py

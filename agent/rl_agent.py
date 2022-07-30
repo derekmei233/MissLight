@@ -11,8 +11,10 @@ class RLAgent(BaseAgent):
 
     def get_reward(self):
         reward = self.reward_generator.generate()
-        assert len(reward) == 1
-        return reward[0]
+        if len(reward) == 1:
+            return reward[0]
+        else:
+            return reward
 
     def get_action(self, ob):
         return self.action_space.sample()

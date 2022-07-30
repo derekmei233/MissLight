@@ -20,6 +20,7 @@ parser = argparse.ArgumentParser(description='DQN control test')
 parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
 parser.add_argument('--action_interval', type=int, default=20, help='how often agent make decisions')
+parser.add_argument('--rewards', type=str, default='mask', help='choose mask reward method')
 parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 parser.add_argument('--save_dir', type=str, default="model", help='directory in which model should be saved')
 parser.add_argument('--state_dir', type=str, default="state", help='directory in which state and road file should be saved')
@@ -101,7 +102,7 @@ def create_agents(world, control, mask_pos):
                 IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
             ],
             LaneVehicleGenerator(
-                world, inter, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
             inter.id, idx
         ))
     elif control == 'SDQN':
@@ -117,7 +118,7 @@ def create_agents(world, control, mask_pos):
                     IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
                 ],
                 LaneVehicleGenerator(
-                    world, inter, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                    world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 inter.id, idx, all_idx
                 ))
                 shared_model, shared_target_model, optimizer = agents[-1].copy_model()
@@ -129,7 +130,7 @@ def create_agents(world, control, mask_pos):
                     IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
                 ],
                 LaneVehicleGenerator(
-                    world, inter, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                    world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 inter.id, idx, all_idx,
                 shared_model, shared_target_model, optimizer
                 ))
@@ -145,7 +146,7 @@ def create_agents(world, control, mask_pos):
                     IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
                 ],
                 LaneVehicleGenerator(
-                    world, inter, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                    world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 inter.id, idx, mask_pos
                 ))
                 shared_model, shared_target_model, optimizer = agents[-1].copy_model()
@@ -157,7 +158,7 @@ def create_agents(world, control, mask_pos):
                     IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
                 ],
                 LaneVehicleGenerator(
-                    world, inter, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                    world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 inter.id, idx, mask_pos,
                 shared_model, shared_target_model, optimizer
                 ))
@@ -170,7 +171,7 @@ def create_agents(world, control, mask_pos):
                     IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
                 ],
                 LaneVehicleGenerator(
-                    world, inter, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                    world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 inter.id, idx
             ))
     else:
@@ -342,6 +343,14 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
                         rewards_list.append(rewards)
                     rewards = np.mean(rewards_list, axis=0)
 
+                    # rewards need mask here
+                    if args.rewards == 'mask':
+                        rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
+                        rewards = np.mean(rewards, axis=1)
+                    elif args.rewards == 'state_diff':
+                        # TODO: implementation of state_difference
+                        pass
+
                     cur_obs, cur_phases = list(zip(*obs))
                     cur_obs = np.array(cur_obs, dtype=np.float32)
                     cur_phases = np.array(cur_phases, dtype=np.int8)
@@ -389,6 +398,8 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
                         i += 1
                         rewards_list.append(rewards)
                     rewards = np.mean(rewards_list, axis=0)
+
+                    rewards = np.mean(rewards, axis=1)
                     cur_obs, cur_phases = list(zip(*obs))
                     cur_obs = np.array(cur_obs, dtype=np.float32)
                     cur_phases = np.array(cur_phases, dtype=np.int8)
@@ -433,6 +444,7 @@ def agents_train_test(e, env, agents, inference_net, infer, mask_pos, relation, 
                 for _ in range(args.action_interval):
                     obs, rewards, dones, _ = env.step(actions)
                     i += 1
+                
                 cur_obs, cur_phases = list(zip(*obs))
                 cur_obs = np.array(cur_obs, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
@@ -517,6 +529,13 @@ def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, re
                     i += 1
                     rewards_list.append(rewards)
                 rewards = np.mean(rewards_list, axis=0)
+                #rewards need mask here
+                if args.rewards == 'mask':
+                    rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards = np.mean(rewards, axis=1)
+                elif args.rewards == 'state_diff':
+                    # TODO: implementation of state_difference
+                    pass
 
                 cur_obs, cur_phases = list(zip(*obs))
                 cur_obs = np.array(cur_obs, dtype=np.float32)
@@ -588,9 +607,9 @@ def shared_agents_train_test(e, env, agents, inference_net, infer, control, mask
     return best_att  
 
 if __name__ == '__main__':
-    mask_num = [4]
+    mask_pos = [[2, 0], [10, 11], [14, 13]]
     generate_choose = 'IDQN'
-    infer_choose = ['net', 'sfm', 'no']  # ['net', 'sfm', 'no']
+    infer_choose = ['sfm']  # ['net', 'sfm', 'no']
     control_choose = ['IDQN', 'SDQN', 'MaskSDQN']  # ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']
     
     config_file = f'cityflow_{args.config}.cfg'
@@ -616,8 +635,8 @@ if __name__ == '__main__':
             # train idqn agents here
             generate_agents = idqn_train(generate_env, generate_agents)
 
-    for mask in mask_num:
-        mask_pos = random.sample(range(np.product(relation['net_shape'])), mask)
+    for mask in mask_pos:
+        mask_pos = mask
         adj_matrix = get_road_adj(relation)   
         mask_matrix = get_mask_matrix(relation, mask_pos)
         logger.info('-------------------------------------')
@@ -631,7 +650,7 @@ if __name__ == '__main__':
                 run_preparation(configuration, mask_pos, graph_signal_matrix_filename, relation, state_file)
                 # train network then start agent training or planning
 
-            elif infer == 'sfm':
+            elif infer == 'sfm':uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu
                 inference_net = SFM_predictor().make_model()
                 for control in control_choose:
                     agents = create_agents(world, control, mask_pos)

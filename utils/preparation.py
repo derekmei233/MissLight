@@ -525,31 +525,52 @@ def inter2edge_slice(relation, states, phases, mask_pos):
     num_roads = len(road_dict_road2id)
     
     # states: [N_node, N_features] -> edge: [N_edge, 11]
-    masked_x = -1 * np.ones((num_roads, 11), dtype=np.float32)
     # only support phase space equal to 8
-    phases_oh = one_hot(phases, 8)
-    for id_node, ob_length in enumerate(states):
-        if id_node in mask_pos:
-            phase = phases_oh[id_node]
-            inter = inter_dict_id2inter[id_node]
-            in_roads = inter_in_roads[inter]
-            for id_road, road in enumerate(in_roads):
-                road_id = road_dict_road2id[road]
-                masked_x[road_id, 3:] = phase
-        else:
-            phase = phases_oh[id_node]
-            direction = []
-            direction.append(np.concatenate([ob_length[0:3], phase]))
-            direction.append(np.concatenate([ob_length[3:6], phase]))
-            direction.append(np.concatenate([ob_length[6:9], phase]))
-            direction.append(np.concatenate([ob_length[9:], phase]))
-            # convert begin
-            inter = inter_dict_id2inter[id_node]
-            in_roads = inter_in_roads[inter]
-            for id_road, road in enumerate(in_roads):
-                road_id = road_dict_road2id[road]
-                masked_x[road_id] = direction[id_road]
-            # convert finished, -1 at masked positions
+    if phases is not None:
+        masked_x = -1 * np.ones((num_roads, 11), dtype=np.float32)
+        phases_oh = one_hot(phases, 8)
+        for id_node, ob_length in enumerate(states):
+            if id_node in mask_pos:
+                phase = phases_oh[id_node]
+                inter = inter_dict_id2inter[id_node]
+                in_roads = inter_in_roads[inter]
+                for id_road, road in enumerate(in_roads):
+                    road_id = road_dict_road2id[road]
+                    masked_x[road_id, 3:] = phase
+            else:
+                phase = phases_oh[id_node]
+                direction = []
+                direction.append(np.concatenate([ob_length[0:3], phase]))
+                direction.append(np.concatenate([ob_length[3:6], phase]))
+                direction.append(np.concatenate([ob_length[6:9], phase]))
+                direction.append(np.concatenate([ob_length[9:], phase]))
+                # convert begin
+                inter = inter_dict_id2inter[id_node]
+                in_roads = inter_in_roads[inter]
+                for id_road, road in enumerate(in_roads):
+                    road_id = road_dict_road2id[road]
+                    masked_x[road_id] = direction[id_road]
+                # convert finished, -1 at masked positions
+    else:
+        masked_x = -1 * np.ones((num_roads, 3), dtype=np.float32)
+        for id_node, ob_length in enumerate(states):
+            if id_node in mask_pos:
+                inter = inter_dict_id2inter[id_node]
+                in_roads = inter_in_roads[inter]
+                for id_road, road in enumerate(in_roads):
+                    road_id = road_dict_road2id[road]
+            else:
+                direction = []
+                direction.append(np.concatenate([ob_length[0:3]]))
+                direction.append(np.concatenate([ob_length[3:6]]))
+                direction.append(np.concatenate([ob_length[6:9]]))
+                direction.append(np.concatenate([ob_length[9:]]))
+                # convert begin
+                inter = inter_dict_id2inter[id_node]
+                in_roads = inter_in_roads[inter]
+                for id_road, road in enumerate(in_roads):
+                    road_id = road_dict_road2id[road]
+                    masked_x[road_id] = direction[id_road]
     return masked_x
 
 def get_mask_matrix(relation, mask_pos):
@@ -585,19 +606,31 @@ def reconstruct_data_slice(data, phases, relation):
     road_dict_road2id = relation['road_dict_road2id']
 
     # (B,N,F,T)->(B,T,N,F)
-    inter_feature = np.zeros((len(inter_dict_inter2id), 12), dtype=np.float32)
-    phase_oh = one_hot(phases, 8)
-    for inter_dic in inter_in_roads:
-        idx = inter_dict_inter2id[inter_dic]
-        phase = phase_oh[idx]
-        in_roads = inter_in_roads[inter_dic]
-        in_roads_id = [road_dict_road2id[road] for road in in_roads]
-        N = data[in_roads_id[0], :3]
-        E = data[in_roads_id[1], :3]
-        S = data[in_roads_id[2], :3]
-        W = data[in_roads_id[3], :3]
-        inter_feature[inter_dict_inter2id[inter_dic]] = np.concatenate([N, E, S, W])
-        # no need to recover phase 
+    if phases is not None:
+        inter_feature = np.zeros((len(inter_dict_inter2id), 12), dtype=np.float32)
+        phase_oh = one_hot(phases, 8)
+        for inter_dic in inter_in_roads:
+            idx = inter_dict_inter2id[inter_dic]
+            phase = phase_oh[idx]
+            in_roads = inter_in_roads[inter_dic]
+            in_roads_id = [road_dict_road2id[road] for road in in_roads]
+            N = data[in_roads_id[0], :3]
+            E = data[in_roads_id[1], :3]
+            S = data[in_roads_id[2], :3]
+            W = data[in_roads_id[3], :3]
+            inter_feature[inter_dict_inter2id[inter_dic]] = np.concatenate([N, E, S, W])
+            # no need to recover phase 
+    else:
+        inter_feature = np.zeros((len(inter_dict_inter2id), 12), dtype=np.float32)
+        for inter_dic in inter_in_roads:
+            idx = inter_dict_inter2id[inter_dic]
+            in_roads = inter_in_roads[inter_dic]
+            in_roads_id = [road_dict_road2id[road] for road in in_roads]
+            N = data[in_roads_id[0], :3]
+            E = data[in_roads_id[1], :3]
+            S = data[in_roads_id[2], :3]
+            W = data[in_roads_id[3], :3]
+            inter_feature[inter_dict_inter2id[inter_dic]] = np.concatenate([N, E, S, W])
     return inter_feature
 
 
@@ -611,7 +644,7 @@ if __name__ == '__main__':
     mask_matrix = get_mask_matrix(relation, mask_pos)
     states = np.random.randint(0, 10, [16, 12])
     phases = np.random.randint(0, 8, [16])
-    masked = inter2edge_slice(relation, states, phases, [9])
+    masked = inter2edge_slice(relation, states, None, [9])
     infer = mask_op(masked, mask_matrix, adj_matrix, 'select')
     final = infer * masked * -1
     prediction = reconstruct_data_slice(final, phases, relation)
