@@ -9,6 +9,7 @@ from metric.metrics import masked_mape_test, masked_mae_test, masked_rmse_test
 import pickle
 
 
+
 def re_normalization(x, mean, std):
     r = x[:, :, :3, :] * std + mean
     r = np.concatenate((r, x[:, :, 3:, :]), axis=2)

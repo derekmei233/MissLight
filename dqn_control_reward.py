@@ -610,7 +610,7 @@ if __name__ == '__main__':
     mask_pos = [[2, 0], [10, 11], [14, 13]]
     generate_choose = 'IDQN'
     infer_choose = ['sfm']  # ['net', 'sfm', 'no']
-    control_choose = ['IDQN', 'SDQN', 'MaskSDQN']  # ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']
+    control_choose = ['IDQN', 'SDQN']  # ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']
     
     config_file = f'cityflow_{args.config}.cfg'
     configuration = f'configurations/{args.config}_astgcn.conf'
@@ -650,7 +650,7 @@ if __name__ == '__main__':
                 run_preparation(configuration, mask_pos, graph_signal_matrix_filename, relation, state_file)
                 # train network then start agent training or planning
 
-            elif infer == 'sfm':uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu
+            elif infer == 'sfm':
                 inference_net = SFM_predictor().make_model()
                 for control in control_choose:
                     agents = create_agents(world, control, mask_pos)

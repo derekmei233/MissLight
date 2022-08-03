@@ -1,2 +1,2 @@
 from .base import BaseMetric
-from .travel_time import TravelTimeMetric
+from .maskMetric import TravelTimeMetric, MSEMetric
