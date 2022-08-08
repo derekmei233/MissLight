@@ -11,13 +11,14 @@ import random
 import pickle as pkl
 from utils.preparation import one_hot
 import torch
+from tqdm import tqdm
 
 from predictionModel.NN import NN_predictor
 
 parser = argparse.ArgumentParser(description='IDQN generate dataset for inference model')
 parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 parser.add_argument('--action_interval', type=int, default=20, help='how often agent make decisions')
-parser.add_argument('--episodes', type=int, default=2, help='training episodes')
+parser.add_argument('--episodes', type=int, default=10, help='training episodes')
 parser.add_argument('--save_dir', type=str, default="model", help='directory in which model should be saved')
 parser.add_argument('--state_dir', type=str, default="state", help='directory in which state and road file should be saved')
 
@@ -70,7 +71,7 @@ def idqn_train(env, agents, state_dir, episode, interval):
     # save t, phase_t, rewards_tp, state_tp, phase_tp(action_t) into dictionary
     info = []
     total_decision_num = 0
-    for e in range(episode):
+    for e in tqdm(range(episode)):
         # collect [state_t, phase_t, reward_t, state_tp, phase_tp(action_t)] pair
         last_obs = env.reset()
         episodes_rewards = [0 for i in agents]

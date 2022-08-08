@@ -12,9 +12,9 @@ import random
 from utils.preparation import one_hot
 
 
-class SDQN(nn.Module):
+class IDQN(nn.Module):
     def __init__(self, size_in, size_out):
-        super(SDQN, self).__init__()
+        super(IDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
         self.dense_2 = nn.Linear(20, 20)
         self.dense_3 = nn.Linear(20, size_out)
@@ -33,20 +33,12 @@ class SDQN(nn.Module):
                 return self._forward(x)
 
 
-class SDQNAgent(RLAgent):
-    zero_idx = None
-    update_idx = None
-    
-    @classmethod
-    def register_idx(cls, zero_idx, update_idx):
-        cls.zero_idx = zero_idx
-        cls.update_idx = update_idx
-
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, all_idx, q_model=None, target_model=None, optimizer=None):
+class IDQNAgent(RLAgent):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx):
         super().__init__(action_space, ob_generator, reward_generator)
+
         self.iid = iid
         self.idx = idx
-        self.all_idx = all_idx
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)
@@ -63,18 +55,10 @@ class SDQNAgent(RLAgent):
         self.batch_size = 32
 
         self.criterion = nn.MSELoss()
-        if q_model is None:
-            self.model = self._build_model()
-            self.target_model = self._build_model()
-            self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False, eps=1e-7)
-            self.update_target_network()
-        else:
-            self.model = q_model
-            self.target_model = target_model
-            self.optimizer = optimizer
-
-    def copy_model(self):
-        return self.model, self.target_model, self.optimizer
+        self.model = self._build_model()
+        self.target_model = self._build_model()
+        self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False, eps=1e-7)
+        self.update_target_network()
 
     def choose(self, ob):
         if np.random.rand() <= self.epsilon:
@@ -99,17 +83,15 @@ class SDQNAgent(RLAgent):
 
     def _build_model(self):
         # Neural Net for Deep-Q learning Model
-        model = SDQN(self.ob_length, self.action_space.n)
+        model = IDQN(self.ob_length, self.action_space.n)
         return model
 
     def _reshape_ob(self, ob):
         return np.reshape(ob, (1, -1))
 
     def update_target_network(self):
-        # only update model at idx == update_idx
-        if self.idx == self.update_idx:
-            weights = self.model.state_dict()
-            self.target_model.load_state_dict(weights)
+        weights = self.model.state_dict()
+        self.target_model.load_state_dict(weights)
 
     def remember(self, ob, action, reward, next_ob):
         self.memory.append((ob, action, reward, next_ob))
@@ -141,27 +123,23 @@ class SDQNAgent(RLAgent):
         for i, action in enumerate(actions):
             target_f[i][action] = target[i]
         loss = self.criterion(self.model.forward(obs, train=True), target_f)
-        if self.idx == self.zero_idx:
-            self.optimizer.zero_grad()
+        self.optimizer.zero_grad()
         loss.backward()
-        if self.idx == self.update_idx:
-            self.optimizer.step()
-            if self.epsilon > self.epsilon_min:
-                self.epsilon *= self.epsilon_decay
+        self.optimizer.step()
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
 
     def load_model(self, model_dir):
-        # only load for idx == min(self.all_id)
-        name = "sdqn.pt"
+        # TODO: add idqn
+        name = "idqn_{}.pt".format(self.iid)
         model_name = os.path.join(model_dir, name)
-        if self.idx == min(self.idx):
-            self.model = SDQN(self.ob_length, self.action_space.n)
-            self.model.load_state_dict(torch.load(model_name))
-            self.target_model.load_state_dict(torch.load(model_name))
+        self.model = IDQN(self.ob_length, self.action_space.n)
+        self.model.load_state_dict(torch.load(model_name))
+        self.target_model.load_state_dict(torch.load(model_name))
 
     def save_model(self, model_dir):
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
-        name = "sdqn.pt"
+        name = "idqn_{}.pt".format(self.iid)
         model_name = os.path.join(model_dir, name)
-        if self.idx == self.update_idx:
-            torch.save(self.model.state_dict(), model_name)
+        torch.save(self.model.state_dict(), model_name)

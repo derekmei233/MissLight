@@ -253,7 +253,7 @@ def idqn_generate(env, agents, raw_state):
     obs = env.reset()
     cur_obs, cur_phases = list(zip(*obs))
     for agent in agents:
-        agent.load_model(model_dir, -1)
+        agent.load_model(model_dir)
     for i in range(args.steps):
         if i % args.action_interval == 0:
             actions = []
@@ -638,7 +638,7 @@ if __name__ == '__main__':
         generate_env = create_env(world, generate_agents)
         if args.load_model:
             for i, ag in enumerate(generate_agents):
-                ag.load_model(model_dir, -1)
+                ag.load_model(model_dir)
         else:
             # train idqn agents here
             generate_agents = idqn_train(generate_env, generate_agents)
@@ -665,7 +665,7 @@ if __name__ == '__main__':
                     env = create_env(world, agents)
                     if control == 'CopyDQN':
                         for i, ag in enumerate(agents):
-                            ag.load_model(model_dir, -1)
+                            ag.load_model(model_dir)
                         # copy IDQN from generation process and use it control. This control does not need a training process
                         logger.info(f'infer = {infer}, control = {control}')
                         agent_plan(env, agents, inference_net, mask_pos, relation, mask_matrix, adj_matrix)
@@ -708,7 +708,7 @@ if __name__ == '__main__':
                     env = create_env(world, agents)
                     if control == 'CopyDQN':
                         for i, ag in enumerate(agents):
-                            ag.load_model(model_dir, -1)
+                            ag.load_model(model_dir)
                         # copy IDQN does not need a training process
                         logger.info(f'infer = {infer}, control = {control}')
                         agent_plan(env, agents, inference_net, mask_pos, relation, mask_matrix, adj_matrix)

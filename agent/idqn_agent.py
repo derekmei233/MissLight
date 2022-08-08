@@ -16,12 +16,13 @@ class IDQN(nn.Module):
     def __init__(self, size_in, size_out):
         super(IDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
-        self.dense_2 = nn.Linear(20, 20)
-        self.dense_3 = nn.Linear(20, size_out)
+        self.dense_2 = nn.Linear(20, 80)
 
+        self.dense_3_0 = nn.Linear(80, 8)
     def _forward(self, x):
         x = F.relu(self.dense_1(x))
         x = F.relu(self.dense_2(x))
+
         x = self.dense_3(x)
         return x
 
@@ -117,6 +118,7 @@ class IDQNAgent(RLAgent):
         minibatch = random.sample(self.memory, self.batch_size)
         
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
+        # 4 output 
         out = self.target_model.forward(next_obs, train=False)
         target = rewards + self.gamma * torch.max(out, dim=1)[0]
         target_f = self.model.forward(obs, train=False)
@@ -129,17 +131,17 @@ class IDQNAgent(RLAgent):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def load_model(self, model_dir, e=-1):
+    def load_model(self, model_dir):
         # TODO: add idqn
-        name = "idqn_{}_{}.pt".format(self.iid, e)
+        name = "idqn_{}.pt".format(self.iid)
         model_name = os.path.join(model_dir, name)
         self.model = IDQN(self.ob_length, self.action_space.n)
         self.model.load_state_dict(torch.load(model_name))
         self.target_model.load_state_dict(torch.load(model_name))
 
-    def save_model(self, model_dir, e = -1):
+    def save_model(self, model_dir):
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
-        name = "idqn_{}_{}.pt".format(self.iid, e)
+        name = "idqn_{}.pt".format(self.iid)
         model_name = os.path.join(model_dir, name)
         torch.save(self.model.state_dict(), model_name)

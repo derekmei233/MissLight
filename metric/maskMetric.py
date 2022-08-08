@@ -29,6 +29,7 @@ class TravelTimeMetric(BaseMetric):
         
 class MSEMetric(BaseMetric):
     def __init__(self, name, world, mask_pos):
+        'Relative Percent Difference: 2 * (x - y) / (abs(x) + abs(y)'
         self.name = name
         self.record = list()
         self.mask_pos = mask_pos
