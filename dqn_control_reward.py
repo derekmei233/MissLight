@@ -618,7 +618,7 @@ def random_mask(num, policy):
         count=0
         masks=[]
         while(count<num):
-            tmp=random.randint(0,16)
+            tmp=random.randint(0,15)
             if tmp+1 not in masks and tmp-1 not in masks and tmp not in masks:
                 masks.append(tmp)
                 count+=1
