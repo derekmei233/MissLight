@@ -605,7 +605,24 @@ def shared_agents_train_test(e, env, agents, inference_net, infer, control, mask
         for ag in agents:
             ag.save_model(model_dir=os.path.join(model_dir, f'BEST_{control}_{sample_method}'))
     logger.info("episode:{}, Test:{}".format(e, att))
-    return best_att  
+    return best_att
+
+# random masked nodes,policy='allowed' or 'forbidden'
+# return a list, which shows missing nodes,for example,num=2,policy='allowed', and [1,9] returns
+def random_mask(num, policy):
+    if policy == "allowed":
+        assert num < 16
+        masks = random.sample(range(0,16),num)
+    elif policy == "forbidden":
+        assert num < 9
+        count=0
+        masks=[]
+        while(count<num):
+            tmp=random.randint(0,16)
+            if tmp+1 not in masks and tmp-1 not in masks and tmp not in masks:
+                masks.append(tmp)
+                count+=1
+    return masks
 
 if __name__ == '__main__':
     mask_pos = [[2, 0], [10, 11], [14, 13]]
