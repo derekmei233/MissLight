@@ -8,20 +8,24 @@ from agent.max_pressure_agent import MaxPressureAgent
 import argparse
 import os
 import numpy as np
+import torch
 import random
 import logging
 from datetime import datetime
-import pickle
-from utils.preparation import build_relation, get_road_adj, run_preparation, get_mask_matrix
+import pickle as pkl
+from utils.preparation import build_relation, get_road_adj, run_preparation, get_mask_matrix, one_hot
 from predictionModel.SFM import SFM_predictor
+from predictionModel.NN import NN_predictor
+from metric.maskMetric import MSEMetric
+import rl_data_generation
 
 
 parser = argparse.ArgumentParser(description='DQN control test')
-parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
+parser.add_argument('--config', type=str, default='ny28x7', help='network working on')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
 parser.add_argument('--action_interval', type=int, default=20, help='how often agent make decisions')
-parser.add_argument('--rewards', type=str, default='mask', help='choose mask reward method')
-parser.add_argument('--episodes', type=int, default=100, help='training episodes')
+parser.add_argument('--rewards', type=str, default='nn', help='choose mask reward method')
+parser.add_argument('--episodes', type=int, default=2, help='training episodes')
 parser.add_argument('--save_dir', type=str, default="model", help='directory in which model should be saved')
 parser.add_argument('--state_dir', type=str, default="state", help='directory in which state and road file should be saved')
 parser.add_argument('--log_dir', type=str, default='logging', help='directory in which logging information should be saved')
@@ -31,7 +35,7 @@ parser.add_argument('--load_model', type=bool, default=False, help='directory fr
 
 args = parser.parse_args()
 
-root_dir = os.path.join('data/output_data', args.prefix)
+root_dir = os.path.join('data/output_data', args.config, args.prefix)
 model_dir = os.path.join(root_dir, args.save_dir)
 state_dir = os.path.join(root_dir, args.state_dir)
 log_dir = os.path.join(root_dir, args.log_dir)
@@ -179,7 +183,9 @@ def create_agents(world, control, mask_pos):
     return agents
 
 def create_world(config_file):
-    return World(config_file, thread_num=8)
+    w = World(config_file, thread_num=8)
+    print(len(w.intersection_ids))
+    return w
 
 def create_env(world, agents):
     return TSCEnv(world, agents, None)
@@ -259,7 +265,7 @@ def idqn_generate(env, agents, raw_state):
     logger.info("Final Travel Time is %.4f" % env.eng.get_average_travel_time())
     raw_state_name  = f'{state_dir}/{raw_state}.pkl'
     with open(raw_state_name, 'wb') as fo:
-        pickle.dump(save_state, fo)
+        pkl.dump(save_state, fo)
     print("save done")
     logger.info('inference network training data preparation finished')
     logger.info('----------------------------------------------------')
@@ -313,6 +319,26 @@ def agent_plan(env, agents, inference_net, mask_pos, relation, mask_matrix, adj_
 
 def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_matrix, adj_matrix):
     # for IDQN training
+    if args.rewards == 'nn':
+        reward_inference_model = NN_predictor(agents[0].ob_length, agents[0].action_space.n, 'cpu', model_dir)
+        generate_agents = rl_data_generation.create_preparation_agents(world)
+        # nn model need training process
+        save_file = os.path.join(state_dir, 'raw_state_IDQN.pkl')
+        if not os.path.isfile(save_file):
+            info = rl_data_generation.idqn_train(env, generate_agents, state_dir, args.episodes, args.action_interval)
+            with open(save_file, 'wb') as f:
+                pkl.dump(info, f)
+        else:
+            with open(save_file, 'rb') as f:
+                info = pkl.load(f)            
+        dataset = rl_data_generation.generate_dataset(save_file)
+        model_file = os.path.join(model_dir, "NN_inference.pt")
+        if os.path.isfile(model_file):
+             reward_inference_model.load_model()
+        else:
+            reward_inference_model.train(dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'], args.episodes)
+    elif args.rewards == 'sfm':
+        reward_inference_model = SFM_predictor().make_model()
     total_decision_num = 0
     best_att = np.inf
     for e in range(args.episodes):
@@ -325,7 +351,7 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
         i = 0
         if infer in ['sfm', 'net']:
             #Debug finished
-            last_obs = inference_net.predict(last_obs, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+            last_obs_pred = inference_net.predict(last_obs, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
             while i < 3600:
                 if i % args.action_interval == 0:
                     actions = []
@@ -343,18 +369,21 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
                         rewards_list.append(rewards)
                     rewards = np.mean(rewards_list, axis=0)
 
-                    # rewards need mask here
-                    if args.rewards == 'mask':
-                        rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
-                        rewards = np.mean(rewards, axis=1)
-                    elif args.rewards == 'state_diff':
-                        # TODO: implementation of state_difference
-                        pass
-
                     cur_obs, cur_phases = list(zip(*obs))
                     cur_obs = np.array(cur_obs, dtype=np.float32)
                     cur_phases = np.array(cur_phases, dtype=np.int8)
                     cur_obs = inference_net.predict(cur_obs, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+
+                    # rewards need mask here
+                    if args.rewards == 'sfm':
+                        rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
+                        rewards = np.mean(rewards, axis=1)
+                    elif args.rewards == 'nn':
+                        # TODO: implementation of state_difference
+                        rewards = np.mean(rewards, axis=1)
+                        for pos in mask_pos:
+                            tmp = reward_inference_model.predict(torch.from_numpy(np.concatenate((cur_obs[pos], one_hot(cur_phases[pos], agents[pos].action_space.n)))))
+                            rewards[pos] = tmp
                     for agent_id, agent in enumerate(agents):
                         agent.remember(
                             (last_obs[agent_id], last_phases[agent_id]), actions[agent_id], rewards[agent_id], (cur_obs[agent_id], cur_phases[agent_id]))
@@ -371,7 +400,7 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
                 if all(dones):
                     break
         elif infer in ['no']:
-            tmp_action = {idx: -1 for idx in range(16) if idx in mask_pos}
+            tmp_action = {idx: -1 for idx in range(len(agents)) if idx in mask_pos}
             # no infer here
             while i < 3600:
                 if i % args.action_interval == 0:
@@ -403,6 +432,16 @@ def agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_mat
                     cur_obs, cur_phases = list(zip(*obs))
                     cur_obs = np.array(cur_obs, dtype=np.float32)
                     cur_phases = np.array(cur_phases, dtype=np.int8)
+                    if args.rewards == 'sfm':
+                        rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
+                        rewards = np.mean(rewards, axis=1)
+                    elif args.rewards == 'nn':
+                        # TODO: implementation of state_difference
+                        rewards = np.mean(rewards, axis=1)
+                        for pos in mask_pos:
+                            tmp = reward_inference_model.predict(torch.from_numpy(np.concatenate((cur_obs[pos], one_hot(cur_phases[pos], agents[pos].action_space.n)))))
+                            rewards[pos] = tmp
+
                     for idx, agent in enumerate(agents):
                         if idx not in mask_pos:
                             agent.remember(
@@ -492,6 +531,27 @@ def agents_train_test(e, env, agents, inference_net, infer, mask_pos, relation, 
 
 def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method='all'):
     # for SDQN training, difference exists in create_agents() and agents.replay()
+    if args.rewards == 'nn':
+        reward_inference_model = NN_predictor(agents[0].ob_length, agents[0].action_space.n, 'cpu', model_dir)
+        generate_agents = rl_data_generation.create_preparation_agents(world)
+        # nn model need training process
+        save_file = os.path.join(state_dir, 'raw_state_IDQN.pkl')
+        if not os.path.isfile(save_file):
+            info = rl_data_generation.idqn_train(env, generate_agents, state_dir, args.episodes, args.action_interval)
+            with open(save_file, 'wb') as f:
+                pkl.dump(info, f)
+        else:
+            with open(save_file, 'rb') as f:
+                info = pkl.load(f)            
+        dataset = rl_data_generation.generate_dataset(save_file)
+        model_file = os.path.join(model_dir, "NN_inference.pt")
+        if os.path.isfile(model_file):
+             reward_inference_model.load_model()
+        else:
+            reward_inference_model.train(dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'], args.episodes)
+    elif args.rewards == 'sfm':
+        reward_inference_model = SFM_predictor().make_model()
+
     if control == 'MaskSDQN':
         zero_idx = min(mask_pos)
         update_idx = max(mask_pos)
@@ -531,17 +591,23 @@ def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, re
                     rewards_list.append(rewards)
                 rewards = np.mean(rewards_list, axis=0)
                 #rewards need mask here
-                if args.rewards == 'mask':
-                    rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
-                    rewards = np.mean(rewards, axis=1)
-                elif args.rewards == 'state_diff':
-                    # TODO: implementation of state_difference
-                    pass
+
 
                 cur_obs, cur_phases = list(zip(*obs))
                 cur_obs = np.array(cur_obs, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
                 cur_obs = inference_net.predict(cur_obs, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+
+                # rewards need mask here
+                if args.rewards == 'sfm':
+                    rewards = inference_net.predict(rewards, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards = np.mean(rewards, axis=1)
+                elif args.rewards == 'nn':
+                    # TODO: implementation of state_difference
+                    rewards = np.mean(rewards, axis=1)
+                    for pos in mask_pos:
+                        tmp = reward_inference_model.predict(torch.from_numpy(np.concatenate((cur_obs[pos], one_hot(cur_phases[pos], agents[pos].action_space.n)))))
+                        rewards[pos] = tmp
                 for agent_id, agent in enumerate(agents):
                     agent.remember(
                         (last_obs[agent_id], last_phases[agent_id]), actions[agent_id], rewards[agent_id], (cur_obs[agent_id], cur_phases[agent_id]))
@@ -571,7 +637,7 @@ def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, re
                 break
         logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         best_att = shared_agents_train_test(e, env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method, best_att)
-        logger.info('-----------------------------------------------------')
+    logger.info('-----------------------------------------------------')
 
 def shared_agents_train_test(e, env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method, best_att):
     total_decision_num = 0
@@ -608,7 +674,7 @@ def shared_agents_train_test(e, env, agents, inference_net, infer, control, mask
     return best_att  
 
 if __name__ == '__main__':
-    mask_pos = [[2, 0], [10, 11], [14, 13]]
+    mask_pos = [[2, 0]]
     generate_choose = 'IDQN'
     infer_choose = ['sfm']  # ['net', 'sfm', 'no']
     control_choose = ['IDQN', 'SDQN']  # ['maxpressure', 'CopyDQN', 'IDQN', 'SDQN', 'MaskSDQN']
@@ -616,7 +682,7 @@ if __name__ == '__main__':
     config_file = f'cityflow_{args.config}.cfg'
     configuration = f'configurations/{args.config}_astgcn.conf'
     graph_signal_matrix_filename = f'{state_dir}/state_{generate_choose}.pkl'
-    
+
     agent_name = generate_choose
     world = create_world(config_file)
     # create relation
@@ -638,7 +704,7 @@ if __name__ == '__main__':
 
     for mask in mask_pos:
         mask_pos = mask
-        adj_matrix = get_road_adj(relation)   
+        adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
         logger.info('-------------------------------------')
         logger.info('-------------------------------------')
@@ -672,11 +738,14 @@ if __name__ == '__main__':
                     elif control == 'IDQN':
                         logger.info(f'infer = {infer}, control = {control}')
                         agents_train(env, agents, inference_net, infer, mask_pos, relation, mask_matrix, adj_matrix)
-                    
+
                     elif control == 'SDQN':
                         sample_method = 'all'
                         logger.info(f'infer = {infer}, control = {control}, sample_method = {sample_method}')
                         shared_agents_train(env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method)
+
+                        agents = create_agents(world, control, mask_pos)
+                        env = create_env(world, agents)
                         sample_method = 'unmask'
                         logger.info(f'infer = {infer}, control = {control}, sample_method = {sample_method}')
                         shared_agents_train(env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method)

@@ -16,13 +16,11 @@ class IDQN(nn.Module):
     def __init__(self, size_in, size_out):
         super(IDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
-        self.dense_2 = nn.Linear(20, 80)
-
-        self.dense_3_0 = nn.Linear(80, 8)
+        self.dense_2 = nn.Linear(20, 20)
+        self.dense_3 = nn.Linear(20, 8)
     def _forward(self, x):
         x = F.relu(self.dense_1(x))
         x = F.relu(self.dense_2(x))
-
         x = self.dense_3(x)
         return x
 

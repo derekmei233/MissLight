@@ -15,22 +15,22 @@ from prepareData import build_relation_intersection_road
 # parse args
 parser = argparse.ArgumentParser(description='Run Example')
 parser.add_argument('--config_file', type=str,
-                    default='cityflow_hz4x4.cfg', help='path of config file')
+                    default='cityflow_syn4x4.cfg', help='path of config file')
 parser.add_argument('--thread', type=int, default=1, help='number of threads')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
 parser.add_argument('--action_interval', type=int, default=20,
                     help='how often agent make decisions')
-parser.add_argument('--episodes', type=int, default=100,
+parser.add_argument('--episodes', type=int, default=10,
                     help='training episodes')
 parser.add_argument('--save_model', action="store_true", default=False)
 parser.add_argument('--load_model', action="store_true", default=False)
 parser.add_argument("--save_rate", type=int, default=20,
                     help="save model once every time this many episodes are completed")
-parser.add_argument('--save_dir', type=str, default="model/dqn_torch_4x4_hz",
+parser.add_argument('--save_dir', type=str, default="model/dqn_torch_4x4_syn",
                     help='directory in which model should be saved')
-parser.add_argument('--log_dir', type=str, default="log/dqn_torch_4x4_hz",
+parser.add_argument('--log_dir', type=str, default="log/dqn_torch_4x4_syn",
                     help='directory in which logs should be saved')
-parser.add_argument('--state_dir', type=str, default="roadgraph/hz",
+parser.add_argument('--state_dir', type=str, default="roadgraph/syn",
                     help='directory in which roadgraph should be saved')
 
 args = parser.parse_args()

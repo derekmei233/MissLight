@@ -64,10 +64,17 @@ def build_relation(world):
             neighbor_num[num] = []
         neighbor_num[num].append(inter_dict_inter2id[inter_dic])
 
+    neighbor_idx = dict()
+    for inter_dic in inter_nb_num:
+        neighbor_idx.update({inter_dict_inter2id[inter_dic]: []})
+        for nb in inter_nb_num[inter_dic]:
+            if inter_dict_inter2id.get(nb) is not None:
+                neighbor_idx[inter_dict_inter2id[inter_dic]].append(inter_dict_inter2id[nb])
+
     net_info = {'inter_dict_id2inter': inter_dict_id2inter, 'inter_dict_inter2id': inter_dict_inter2id,
                 'road_dict_id2road': road_dict_id2road, 'road_dict_road2id': road_dict_road2id,
                 'inter_in_roads': inter_in_roads, 'inter_out_roads': inter_out_roads,
-                'road_links': road_links, 'neighbor_num': neighbor_num, 'net_shape': net_shape}
+                'road_links': road_links, 'neighbor_idx': neighbor_idx, 'net_shape': net_shape}
     print("relationship generated")
     return net_info
 
