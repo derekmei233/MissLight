@@ -5,7 +5,7 @@ import random
 
 def random_mask(num, policy, relation):
     # its grid style road network, and we need to keep mask position at every position with relatively same visit probability. Balanced exhaustive enumeration, sequential sampling method is better.
-    seed = random.seed(random.randint(1, 1000))
+    seed = random.seed(random.randint(1, 10000))
     neighbor = relation['neighbor_idx']
     n_intersections = len(neighbor)
     candidate = list(np.arange(0, n_intersections))
@@ -14,6 +14,8 @@ def random_mask(num, policy, relation):
     sampled = list()
 
     if policy == "neighbor":
+        assert num != 1, 'plz raise num'
+            
         neighbor_flag = 0
         count = 0
         assert num < n_intersections
@@ -30,7 +32,8 @@ def random_mask(num, policy, relation):
                 if tmp in neighbor_pool:
                     neighbor_flag = 1
                 new_neighbor = neighbor[tmp]
-                neighbor_pool = neighbor_pool or new_neighbor
+                neighbor_pool.extend(new_neighbor)
+                neighbor_pool = list(set(neighbor_pool))
                 for item in new_neighbor:
                     if item in neighbor_non_pool:
                        neighbor_non_pool.remove(item)
@@ -61,3 +64,47 @@ if __name__ == '__main__':
     world = World(config_file, thread_num=8)
     relation = build_relation(world)
     mask = random_mask(2, 'neighbor', relation)
+
+    # sanity check 
+    count = 0 
+    test = [1,2,3,4]
+    red_flag = 0
+    for t in test:
+        for i in range(1000):
+            result = random_mask(t, 'non-neighbor', relation)
+            # test neighboring
+            record = result.copy()
+            while result:
+                att = result.pop()
+                for peek in result:
+                    if att in relation['neighbor_idx'][peek]:
+                        print('test non-neighbor failed')
+                        print(f'case: {record}')
+                        red_flag = 1
+    if red_flag == 0:
+        print('test non-neighbor success')
+
+    red_flag = 0 
+    test = [2,3,4]
+    for t in test:
+        for i in range(1000):
+            neighbor_flag = 0 
+            result = random_mask(t, 'neighbor', relation)
+            record = result.copy()
+            while result:
+                att = result.pop()
+                for peek in result:
+                    if att in relation['neighbor_idx'][peek]:
+                        neighbor_flag = 1
+                        break
+            if neighbor_flag == 0:
+                print('test neighbor failed')
+                print(f'case: {record}')
+                red_flag = 1
+    if red_flag == 0:
+        print('test neighbor success')
+            
+
+
+
+
