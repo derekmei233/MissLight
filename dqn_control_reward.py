@@ -4,6 +4,7 @@ from environment import TSCEnv
 from generator import LaneVehicleGenerator, IntersectionPhaseGenerator
 from agent.idqn_agent import IDQNAgent
 from agent.sdqn_agent import SDQNAgent
+from agent.fixedtime_agent import FixedTimeAgent
 from agent.max_pressure_agent import MaxPressureAgent
 import argparse
 import os
@@ -21,7 +22,7 @@ import rl_data_generation
 
 
 parser = argparse.ArgumentParser(description='DQN control test')
-parser.add_argument('--config', type=str, default='ny28x7', help='network working on')
+parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 parser.add_argument('--steps', type=int, default=3600, help='number of steps')
 parser.add_argument('--action_interval', type=int, default=20, help='how often agent make decisions')
 parser.add_argument('--rewards', type=str, default='nn', help='choose mask reward method')
@@ -61,22 +62,25 @@ logger.addHandler(fh)
 logger.addHandler(sh)
 
 
-def create_preparation_agents(world):
+def create_preparation_agents(world, mask_pos):
     agents = []
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
-        agents.append(IDQNAgent(
-            action_space,
-            [
+        if idx not in mask_pos:
+            agents.append(IDQNAgent(
+                action_space,
+                [
+                    LaneVehicleGenerator(
+                        world, i, ["lane_count"], in_only=True, average=None),
+                    IntersectionPhaseGenerator(world, i, ["phase"], targets=[
+                                            "cur_phase"], negative=False),
+                ],
                 LaneVehicleGenerator(
-                    world, i, ["lane_count"], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, i, ["phase"], targets=[
-                                        "cur_phase"], negative=False),
-            ],
-            LaneVehicleGenerator(
-                world, i, ["lane_waiting_count"], in_only=True, average="all", negative=True),
-            i.id, idx
-        ))
+                    world, i, ["lane_waiting_count"], in_only=True, average="all", negative=True),
+                i.id, idx
+            ))
+        else:
+            agents.append(FixedTimeAgent(action_space, i, idx))
     return agents
 
 def create_agents(world, control, mask_pos):

@@ -31,13 +31,14 @@ class IDQN(nn.Module):
             with torch.no_grad():
                 return self._forward(x)
 
-
 class IDQNAgent(RLAgent):
     def __init__(self, action_space, ob_generator, reward_generator, iid, idx):
         super().__init__(action_space, ob_generator, reward_generator)
-
+        
         self.iid = iid
         self.idx = idx
+        self.name = self.__class__.__name__
+
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)
@@ -73,7 +74,6 @@ class IDQNAgent(RLAgent):
         obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float()
         act_values = self.model.forward(obs)
         return torch.argmax(act_values)
-    
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
 
