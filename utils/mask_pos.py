@@ -1,5 +1,5 @@
 import numpy as np
-from preparation import build_relation
+from utils.preparation import build_relation
 import random
 
 
@@ -39,7 +39,6 @@ def random_mask(num, policy, relation):
                        neighbor_non_pool.remove(item)
             count+=1
 
-
     elif policy == "non_neighbor":
         assert num <= n_intersections/2
         count=0
@@ -55,6 +54,8 @@ def random_mask(num, policy, relation):
             #tmp=random.randint(0,15)
             count+=1
             assert num - count <= len(candidate), "please try a lower num"
+    else:
+        raise RuntimeError('sampling not implemented')
     return sampled
 
 

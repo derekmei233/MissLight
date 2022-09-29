@@ -14,7 +14,7 @@ def store_reshaped_data(data, information):
     for i in range(2, len(information[0])):
         state_t = np.concatenate((state_t, information[0][i][0][np.newaxis, :]), axis = 0)
         phase_t = np.concatenate((phase_t, information[0][i][1][np.newaxis, :]), axis =0)
-        reward = np.concatenate((reward, information[1][i][np.newaxis, :]), axis = 0)
+        reward = np.concatenate((reward, information[1][i][np.newaxis]), axis = 0)
         state_tp = np.concatenate((state_tp, information[2][i][0][np.newaxis, :]), axis = 0)
         phase_tp = np.concatenate((phase_tp, information[2][i][1][np.newaxis, :]), axis = 0)
     data.append([state_t, phase_t, reward, state_tp, phase_tp])

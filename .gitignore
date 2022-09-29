@@ -14,3 +14,5 @@ data/replay_dir/
 .vscode
 data/output_data
 *.out
+*.sh
+*.ipynb

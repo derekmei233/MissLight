@@ -1,3 +1,4 @@
+from re import L
 from . import BaseAgent
 from prepareData import inter2state
 import numpy as np
@@ -7,51 +8,33 @@ class MaxPressureAgent(BaseAgent):
     """
     Agent using Max-Pressure method to control traffic light
     """
-    def __init__(self, action_space, I, world, ob_generator=None):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx):
         super().__init__(action_space)
-        self.I = I
-        self.world = world
-        self.world.subscribe("lane_count")
-        #self.world.subscribe("phase")
+        self.iid = iid
+        self.idx = idx
+
         self.ob_generator = ob_generator
+        self.reward_generator = reward_generator
+        self.I = self.ob_generator[0].world.id2intersection[self.iid]
+        self.name = self.__class__.__name__
         
         # the minimum duration of time of one phase
         self.t_min = 10
+        self.learning_start = np.inf
 
     def get_ob(self):
-        if self.ob_generator is not None:
-            obs_lane = self.ob_generator[0].generate()
-            return obs_lane, [-1]
-        else:
-            return None
+        # return true value but not use it later if idx in mask_pos
+        return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
 
     def get_phase(self):
-        if self.ob_generator is not None:
-            cur_phase = self.ob_generator[1].generate()
-            return cur_phase
-        else:
-            return None
+        return self.ob_generator[1].generate()
 
-    # max_pressure version
-    """
-    def get_action(self, ob):
-        # get lane pressure
-        lvc = self.world.get_info("lane_count")
+    def get_reward(self):
+        '''take position at np.mean()'''
+        return self.reward_generator.generate()
 
-        if self.I.current_phase_time < self.t_min:
-            return self.I.current_phase
-
-        max_pressure = None
-        action = -1
-        for phase_id in range(len(self.I.phases)):
-            pressure = sum([lvc[start] - lvc[end] for start, end in self.I.phase_available_lanelinks[phase_id]])
-            if max_pressure is None or pressure > max_pressure:
-                action = phase_id
-                max_pressure = pressure
-
-        return action
-    """
     # inference version
+    
     def get_action(self, obs, phase, relation):
         # get lane pressure
         #lvc_1 = self.world.get_info("lane_count")
@@ -104,23 +87,18 @@ class MaxPressureAgent(BaseAgent):
                 max_pressure = pressure
 
         return action
+    
+    def update_target_network(self):
+        pass
 
-    # original version
-    def get_action_org(self, obs):
-        # get lane pressure
-        lvc = self.world.get_info("lane_count")
-        if self.I.current_phase_time < self.t_min:
-            return self.I.current_phase
+    def remember(self, ob, action, reward, next_ob):
+        pass
 
-        max_pressure = None
-        action = -1
-        for phase_id in range(len(self.I.phases)):
-            pressure = sum([lvc[start] - lvc[end] for start, end in self.I.phase_available_lanelinks[phase_id]])
-            if max_pressure is None or pressure > max_pressure:
-                action = phase_id
-                max_pressure = pressure
+    def load_model(self):
+        pass
 
-        return action
+    def save_model(self, model_dir):
+        pass
 
-    def get_reward(self):
-        return None
+    def test(self):
+        print(f'{self.__repr__}: {self.cur_t, self.phase}')

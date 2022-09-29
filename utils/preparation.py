@@ -3,6 +3,23 @@ import os
 import configparser
 import pickle
 import random
+import json
+import re
+
+def fork_config(load_file, save_dir):
+    # process and redirect .cfg file into current working directory
+    oList = re.split('\_|\.', load_file)
+    network = oList[1] # network name
+    # change .cfg settings according to the shell inputs
+    with open(load_file) as f:
+        contents = json.load(f)
+    save_file = os.path.join(save_dir, load_file)
+    contents['saveReplay'] = True
+    contents['roadnetLogFile'] = os.path.join(save_dir.lstrip('data/'), contents['roadnetLogFile'].split('/')[-1])
+    contents['replayLogFile'] = os.path.join(save_dir.lstrip('data/'), contents['replayLogFile'].split('/')[-1])
+    with open(save_file, 'w') as f:
+        json.dump(contents, f, indent=2)
+    return save_file
 
 
 def one_hot(phase, num_class):
@@ -506,20 +523,20 @@ def mask_op(data, mask_matrix, adj_matrix, data_construct):
                     rand_id = random.randint(0, len(mask_matrix)-1)
                     while mask_matrix[rand_id] != 1:
                         rand_id = random.randint(0, len(mask_matrix)-1)
-                    data_or[mask_id, :3] = data[rand_id, :3]
+                    data_or[mask_id, :3] = data[rand_id, :3].copy()
                 if value == 0:
                     # set virtual node's phase
                     rand_id = random.sample(neighbors, 1)[0]
-                    data_or[mask_id, 3:] = data[rand_id, 3:]
+                    data_or[mask_id, 3:] = data[rand_id, 3:].copy()
     else:
         for mask_id, value in enumerate(mask_matrix):
             if value != 1:
                 rand_id = random.randint(0, len(mask_matrix)-1)
                 while mask_matrix[rand_id] != 1:
                     rand_id = random.randint(0, len(mask_matrix)-1)
-                data_or[mask_id, :3] = data[rand_id, :3]
+                data_or[mask_id, :3] = data[rand_id, :3].deepcopy()
                 if value == 0:
-                    data_or[mask_id, 3:] = data[rand_id, 3:]
+                    data_or[mask_id, 3:] = data[rand_id, 3:].deepcopy()
     return data_or
 
 def inter2edge_slice(relation, states, phases, mask_pos):
@@ -618,7 +635,7 @@ def reconstruct_data_slice(data, phases, relation):
         phase_oh = one_hot(phases, 8)
         for inter_dic in inter_in_roads:
             idx = inter_dict_inter2id[inter_dic]
-            phase = phase_oh[idx]
+            #phase = phase_oh[idx]
             in_roads = inter_in_roads[inter_dic]
             in_roads_id = [road_dict_road2id[road] for road in in_roads]
             N = data[in_roads_id[0], :3]

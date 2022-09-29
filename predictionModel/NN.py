@@ -84,7 +84,7 @@ class N_net(nn.Module):
     def __init__(self, size_in, size_out):
         super(N_net, self).__init__()
         self.dense_1 = nn.Linear(size_in, 64)
-        self.dense_2 = nn.Linear(62, 128)
+        self.dense_2 = nn.Linear(64, 128)
         self.dense_3 = nn.Linear(128, 128)
         self.dense_4 = nn.Linear(128, 20)
         self.dense_5 = nn.Linear(20, size_out)

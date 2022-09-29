@@ -21,9 +21,13 @@ class FixedTimeAgent(BaseAgent):
 
         self.time = time
         self.step = step
+        self.phase = 0
     
     def get_phase(self):
         return self.ob_generator[1].generate()
+
+    def get_current_time(self):
+        return self.ob_generator[0].world.eng.get_current_time()
     
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
@@ -32,17 +36,17 @@ class FixedTimeAgent(BaseAgent):
         '''take position at np.mean()'''
         return self.reward_generator.generate()
 
-    def choose(self, obs=None):
-        if self.ob_generator.world. % self.time == (self.time - 1):
+    def choose(self, obs=None, phases=None):
+        cur_time = self.get_current_time()
+        if cur_time == 0:
+            self.phase = 0
+        elif cur_time % self.time == 0:
             self.phase += 1
             self.phase = self.phase % self.action_space.n
-        self.cur_t += 1
-
-        if self.cur_t == self.step
         return self.phase
 
     def get_action(self, obs, phase, relation=None):
-        return self.choose(self, obs)
+        return self.choose()
 
     def sample(self):
         return self.choose()

@@ -43,8 +43,8 @@ class IDQNAgent(RLAgent):
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)
 
-        self.memory = deque(maxlen=4000)
-        self.learning_start = 200
+        self.memory = deque(maxlen=5000)
+        self.learning_start = 1000
         self.update_model_freq = 1
         self.update_target_model_freq = 20
         self.gamma = 0.95  # discount rate
@@ -60,20 +60,18 @@ class IDQNAgent(RLAgent):
         self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False, eps=1e-7)
         self.update_target_network()
 
-    def choose(self, ob):
+    def choose(self, ob, phase, relation=None):
         if np.random.rand() <= self.epsilon:
             return self.action_space.sample()
-        ob_oh = one_hot(ob[1], self.action_space.n)
-        ob = torch.tensor(np.concatenate((ob[0], ob_oh))).float()
-        act_values = self.model.forward(ob)
-        return torch.argmax(act_values)
+        return self.get_action(ob, phase, relation)
 
     def get_action(self, ob, phase, relation=None):
         # get all observation now
         ob_oh = one_hot(phase[self.idx], self.action_space.n)
         obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float()
-        act_values = self.model.forward(obs)
+        act_values = self.model.forward(obs, train=False)
         return torch.argmax(act_values)
+
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
 

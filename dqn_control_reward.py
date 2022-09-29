@@ -596,7 +596,6 @@ def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, re
                 rewards = np.mean(rewards_list, axis=0)
                 #rewards need mask here
 
-
                 cur_obs, cur_phases = list(zip(*obs))
                 cur_obs = np.array(cur_obs, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
@@ -637,7 +636,7 @@ def shared_agents_train(env, agents, inference_net, infer, control, mask_pos, re
                         agent.update_target_network()
             else:
                 raise RuntimeError(f'sample_method: {sample_method} not implemented')
-            if all(dones):
+            if all(dones):  
                 break
         logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         best_att = shared_agents_train_test(e, env, agents, inference_net, infer, control, mask_pos, relation, mask_matrix, adj_matrix, sample_method, best_att)

@@ -42,11 +42,11 @@ class SDQNAgent(RLAgent):
         cls.zero_idx = zero_idx
         cls.update_idx = update_idx
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, all_idx, q_model=None, target_model=None, optimizer=None):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, q_model=None, target_model=None, optimizer=None):
         super().__init__(action_space, ob_generator, reward_generator)
         self.iid = iid
         self.idx = idx
-        self.all_idx = all_idx
+        
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)

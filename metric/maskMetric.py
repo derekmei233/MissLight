@@ -30,15 +30,29 @@ class TravelTimeMetric(BaseMetric):
 class MSEMetric(BaseMetric):
     def __init__(self, name, mask_pos):
         self.name = name
+        self.buffer = list()
         self.record = list()
         self.mask_pos = mask_pos
-    
-    def update(self, pred, true):
+
+    def add(self, pred, true):
         # should be [N_intersection, N_features]
-        diff = pred[self.mask_pos] - true[self.mask_pos]
-        info = np.square(np.mean(diff))
-        self.record.append(info)
+        diff = np.square(pred[self.mask_pos] - true[self.mask_pos])
+        info = np.mean(diff)
+        self.buffer.append(info)
+    
+    def update(self):
+        # should be [N_intersection, N_features]
+        assert len(self.buffer) != 0, 'no record inside buffer'
+        epo_avg = sum(self.buffer) / len(self.buffer)
+        self.record.append(epo_avg)
+        self.buffer = list()
+
+    def reset(self):
+        self.buffer = list()
+        self.record = list()
+    
+    def get_cur_result(self):
+        return sum(self.buffer) / len(self.buffer)
 
     def get_result(self):
-        return sum(self.record)/ len(self.record)
-        
+        return sum(self.record) / len(self.record)
