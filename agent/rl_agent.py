@@ -1,4 +1,4 @@
-from . import BaseAgent
+from .base import BaseAgent
 
 class RLAgent(BaseAgent):
     def __init__(self, action_space, ob_generator, reward_generator):

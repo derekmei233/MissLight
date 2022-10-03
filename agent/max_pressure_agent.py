@@ -12,7 +12,7 @@ class MaxPressureAgent(BaseAgent):
         super().__init__(action_space)
         self.iid = iid
         self.idx = idx
-
+        self.sub_agents = 1
         self.ob_generator = ob_generator
         self.reward_generator = reward_generator
         self.I = self.ob_generator[0].world.id2intersection[self.iid]

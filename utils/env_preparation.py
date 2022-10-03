@@ -1,6 +1,6 @@
 import gym
 from agent.max_pressure_agent import MaxPressureAgent
-from agent.sdqn_agent import SDQNAgent
+from agent.sdqn_agent import SDQNAgent, build_shared_model
 from predictionModel.NN import NN_predictor
 from predictionModel.SFM import SFM_predictor
 from metric.maskMetric import MSEMetric
@@ -22,6 +22,7 @@ from datetime import datetime
 import logging
 import numpy as np
 import torch
+import torch.optim as optim
 
 # protocol: last_obs is returned from env, (last_stats, last_phases) is returned from imputation
 
@@ -36,7 +37,7 @@ parser.add_argument('--save_dir', type=str, default="model", help='directory in 
 parser.add_argument('--state_dir', type=str, default="state", help='directory in which state and road file should be saved')
 parser.add_argument('--log_dir', type=str, default='logging', help='directory in which logging information should be saved')
 parser.add_argument('--infer', type=str, default='st', choices=['st', 'stp'], help='choose inference model\'s input')
-parser.add_argument('-type', default='F-F', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O', 'F-F'])
+parser.add_argument('-type', default='S-S-O', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O', 'F-F'])
 parser.add_argument('--prefix', default='test_fix')
 
 def create_world(config_file):
@@ -60,7 +61,7 @@ def create_fixedtime_agents(world, time=30):
         ))
     return agents
 
-def fixedtime_execute(logger, relation):
+def fixedtime_execute(logger, env, agents, action_interval, relation):
     env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
     save_dir = name[name.index('/output_data'): name.index('/logging')]
@@ -416,45 +417,32 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     return best_att
 
 
-def create_sdqn_agents(world):
+def create_sdqn_agents(world, mask_pos):
     agents = []
-    shared_model, shared_target_model, optimizer = None, None, None
-    all_idx = list(range(len(world.intersections)))
+    obs_pos = list(set(range(len(world.intersections))) - set(mask_pos))
+    iid = []
+    ob_generator = []
+    reward_generator = []
     for idx, inter in enumerate(world.intersections):
-        action_space = gym.spaces.Discrete(len(inter.phases))
-        if shared_model is None:
-            agents.append(SDQNAgent(action_space, 
+        ob_generator.append(
             [
-                LaneVehicleGenerator(
-                    world, inter, ["lane_count"], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
-            ],
-            LaneVehicleGenerator(
-                world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
-            inter.id, idx
-            ))
-            shared_model, shared_target_model, optimizer = agents[-1].copy_model()
-        else:
-            agents.append(SDQNAgent(action_space, 
-            [
-                LaneVehicleGenerator(
-                    world, inter, ["lane_count"], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, inter, ["phase"], targets=["cur_phase"], negative=False),
-            ],
-            LaneVehicleGenerator(
-                world, inter, ["lane_waiting_count"], in_only=True, average=None, negative=True),
-            inter.id, idx,
-            shared_model, shared_target_model, optimizer
-            ))
+                LaneVehicleGenerator(world, inter, ['lane_count'], in_only=True, average=None),
+                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False)
+            ])
+        reward_generator.append(LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average=None, negative=True))
+        iid.append(inter.id)
+    action_space = gym.spaces.Discrete(len(world.intersections[-1].phases))
+    ob_length = ob_generator[0][0].ob_length + action_space.n
+    q_model = build_shared_model(ob_length, action_space)
+    target_q_model = build_shared_model(ob_length, action_space)
+    optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
+    agents.append(SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
     return agents
 
 
 def app1_trans_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix):
     # this method is used in approach 1 ,transfer and approach 2, shared-parameter. 
     logger.info(f"SDQN - SDQN - O control") 
-    zero_idx = min(set(range(len(env.world.intersections))) - set(mask_pos))
-    update_idx = max(set(range(len(env.world.intersections))) - set(mask_pos))
-    SDQNAgent.register_idx(zero_idx, update_idx)
     total_decision_num = 0
     best_att = np.inf
     record = MSEMetric('state mse', mask_pos)
@@ -464,21 +452,18 @@ def app1_trans_train(logger, env, agents, episode, action_interval, inference_ne
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         # only recover state_t since we need this var to determine action t
-        recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
-        record.add(last_states, recovered)
+        last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        record.add(last_states, last_recovered)
         episodes_decision_num = 0
-        episodes_rewards = [0 for _ in agents]
+        episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
         i = 0
         while i < 3600:
             if i % action_interval == 0:
-                actions = []
-                for agent_id, ag in enumerate(agents):
+                for ag in agents:
                     if total_decision_num > ag.learning_start:
-                        action = ag.choose((recovered[agent_id], last_phases[agent_id]))
-                        actions.append(action)
+                        actions = ag.choose(last_recovered, last_phases, relation)
                     else:
-                        action = ag.sample()
-                        actions.append(action)
+                        actions = ag.sample()
                 rewards_list = []
                 for _ in range(action_interval):
                     obs, rewards, dones, _ = env.step(actions)
@@ -490,23 +475,24 @@ def app1_trans_train(logger, env, agents, episode, action_interval, inference_ne
                 cur_states, cur_phases = list(zip(*obs))
                 cur_states = np.array(cur_states, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
-                recovered_p = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
-                record.add(cur_states, recovered_p)
-                for agent_id, ag in enumerate(agents):
-                    ag.remember(
-                        (recovered[agent_id], last_phases[agent_id]), actions[agent_id], rewards[agent_id], (recovered_p[agent_id], cur_phases[agent_id]))
-                    episodes_rewards[agent_id] += rewards[agent_id]
-                    episodes_decision_num += 1
-                total_decision_num += 1
+                cur_recovered = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                record.add(cur_states, cur_recovered)
+                for ag in (agents):
+                    for idx in ag.idx:
+                        ag.remember(
+                            (last_recovered[idx], last_phases[idx]), actions[idx], rewards[idx], (cur_recovered[idx], cur_phases[idx]), idx)
+                        episodes_rewards[idx] += rewards[idx]
+                        episodes_decision_num += 1
+                total_decision_num += agents[0].sub_agents
                 last_obs = obs
                 last_states = cur_states
                 last_phases = cur_phases
-                recovered = recovered_p
-            for agent_id, ag in enumerate(agents):
+                last_recovered = cur_recovered
+            for ag in agents:
                 # only use experiences at observable intersections
-                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1 and agent_id not in mask_pos:
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
                     ag.replay()
-                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1 and agent_id not in mask_pos:
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
                     ag.update_target_network()
         cur_mse = record.get_cur_result()
         record.update()
@@ -520,6 +506,13 @@ def app1_trans_train(logger, env, agents, episode, action_interval, inference_ne
     return record
 
 def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix):
+    if e % SAVE_RATE == SAVE_RATE - 1:
+        env.eng.set_save_replay(True)
+        name = logger.handlers[0].baseFilename
+        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
+    else:
+        env.eng.set_save_replay(False)
     i = 0
     obs = env.reset()
     states, phases = list(zip(*env.reset()))
@@ -531,10 +524,8 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
             # SFM inference states
             recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(states, recovered)
-            actions = []
-            for agent_id, ag in enumerate(agents):
-                action = ag.get_action(recovered, phases, relation)
-                actions.append(action)
+            for ag in agents:
+                actions = ag.get_action(recovered, phases, relation)
             for _ in range(action_interval):
                 obs, rewards, dones, _ = env.step(actions)
                 i += 1
@@ -592,7 +583,7 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
         while i < 3600:
             if i % action_interval == 0:
                 actions = []
-                for agent_id, ag in enumerate(agents):
+                for ag in agents:
                     if total_decision_num > ag.learning_start:
                         action = ag.choose(last_recovered, last_phases)
                         actions.append(action)
@@ -681,7 +672,7 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
             recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(states, recovered)
             actions = []
-            for agent_id, ag in enumerate(agents):
+            for ag in agents:
                 action = ag.get_action(recovered, phases, relation)
                 actions.append(action)
             for _ in range(action_interval):
@@ -710,9 +701,7 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
         reward_inference_net.load_model()
     else:
         raise RuntimeError('not implemented yet')
-    zero_idx = 0
-    update_idx =len(env.world.intersections) - 1
-    SDQNAgent.register_idx(zero_idx, update_idx)
+
     total_decision_num = 0
     best_att = np.inf
     record = MSEMetric('state mse', mask_pos)
@@ -723,21 +712,18 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         # only recover state_t since we need this var to determine action t
-        recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
-        record.add(last_states, recovered)
+        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        record.add(last_states, last_recovered)
         episodes_decision_num = 0
-        episodes_rewards = [0 for _ in agents]
+        episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
         i = 0
         while i < 3600:
             if i % action_interval == 0:
-                actions = []
-                for agent_id, ag in enumerate(agents):
+                for ag in agents:
                     if total_decision_num > ag.learning_start:
-                        action = ag.choose((recovered[agent_id], last_phases[agent_id]))
-                        actions.append(action)
+                        actions = ag.choose(last_recovered, last_phases, relation)
                     else:
-                        action = ag.sample()
-                        actions.append(action)
+                        actions = ag.sample()
                 rewards_list = []
                 for _ in range(action_interval):
                     obs, rewards, dones, _ = env.step(actions)
@@ -752,7 +738,7 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
                 elif reward_type == 'NN_st':
                     rewards_recovered = rewards.copy()
                     for pos in mask_pos:
-                        tmp = reward_inference_net.predict(torch.from_numpy(np.concatenate((last_states[pos], one_hot(last_phases[pos], agents[pos].action_space.n)))))
+                        tmp = reward_inference_net.predict(torch.from_numpy(np.concatenate((last_recovered[pos], one_hot(last_phases[pos], agents[0].action_space.n)))))
                         rewards_recovered[pos] = tmp
                     reward_record.add(rewards, rewards_recovered)
                 elif reward_type == 'NN_stp':
@@ -763,19 +749,20 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
                 cur_states, cur_phases = list(zip(*obs))
                 cur_states = np.array(cur_states, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
-                recovered_p = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
-                record.add(cur_states, recovered_p)
-                for agent_id, ag in enumerate(agents):
-                    ag.remember(
-                        (recovered[agent_id], last_phases[agent_id]), actions[agent_id], rewards_recovered[agent_id], (recovered_p[agent_id], cur_phases[agent_id]))
-                    episodes_rewards[agent_id] += rewards[agent_id]
-                    episodes_decision_num += 1
-                total_decision_num += 1
+                cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                record.add(cur_states, cur_recovered)
+                for ag in agents:
+                    for idx in ag.idx:
+                        ag.remember(
+                            (last_recovered[idx], last_phases[idx]), actions[idx], rewards_recovered[idx], (cur_recovered[idx], cur_phases[idx]), idx)
+                        episodes_rewards[idx] += rewards[idx]
+                        episodes_decision_num += 1
+                total_decision_num += agents[0].sub_agents
                 last_obs = obs
                 last_states = cur_states
                 last_phases = cur_phases
-                recovered = recovered_p
-            for agent_id, ag in enumerate(agents):
+                last_recovered = cur_recovered
+            for ag in agents:
                 # only use experiences at observable intersections
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
                     ag.replay()
@@ -796,6 +783,13 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
     return record
 
 def app2_shared_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix):
+    if e % SAVE_RATE == SAVE_RATE - 1:
+        env.eng.set_save_replay(True)
+        name = logger.handlers[0].baseFilename
+        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
+    else:
+        env.eng.set_save_replay(False)
     i = 0
     obs = env.reset()
     states, phases = list(zip(*env.reset()))
@@ -808,9 +802,8 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
             recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(states, recovered)
             actions = []
-            for agent_id, ag in enumerate(agents):
-                action = ag.get_action(recovered, phases, relation)
-                actions.append(action)
+            for ag in agents:
+                actions = ag.get_action(recovered, phases, relation)
             for _ in range(action_interval):
                 obs, rewards, dones, _ = env.step(actions)
                 i += 1
@@ -863,7 +856,7 @@ if __name__ == "__main__":
     save_file = os.path.join(state_dir, f'state_{args.infer}_reward.pkl')
 
     #mask_pos = [2, 0]
-    mask_pos = [1,11,14,56,42,102,42,35,65,86,68,56]
+
     logger.info(f"mask_pos: {mask_pos}")
     world = create_world(config_file)
     relation = build_relation(world)
@@ -908,7 +901,7 @@ if __name__ == "__main__":
         app1maxp_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix)
 
     elif test_type == 'S-S-O':
-        agents = create_sdqn_agents(world)
+        agents = create_sdqn_agents(world, mask_pos)
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
@@ -924,7 +917,7 @@ if __name__ == "__main__":
         app2_conc_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir)
         
     elif test_type == 'S-S-A':
-        agents = create_sdqn_agents(world)
+        agents = create_sdqn_agents(world, mask_pos=[])
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)

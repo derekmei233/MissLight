@@ -6,8 +6,8 @@ from agent.fixedtime_agent import FixedTimeAgent
 import pickle as pkl
 from utils.preparation import build_relation, get_road_adj, get_mask_matrix, fork_config
 from rl_data_generation import store_reshaped_data, generate_dataset
-from utils.env_preparation import create_env, create_world, create_preparation_agents, create_app1maxp_agents, create_idqn_agents,\
-    create_maxp_agents, create_sdqn_agents, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, naive_train, maxp_execute
+from utils.env_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents, create_app1maxp_agents, create_idqn_agents,\
+    create_maxp_agents, create_sdqn_agents, fixedtime_execute, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, naive_train, maxp_execute
 from utils.mask_pos import random_mask
 import argparse
 import os
@@ -28,7 +28,7 @@ parser.add_argument('--episodes', type=int, default=100, help='training episodes
 
 parser.add_argument('-impute', default='sfm')
 parser.add_argument('-agent', default='dqn')
-parser.add_argument('-control', default='I-F', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
+parser.add_argument('-control', default='F-F', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
 parser.add_argument('--prefix', default='0', type=str)
 
 parser.add_argument('--debug', action='store_true')
@@ -112,6 +112,10 @@ if __name__ == "__main__":
         net.train(dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'], 10)
         test = net.predict(torch.from_numpy(dataset['x_train'][11]).to('cpu'))
 
+    elif args.control =='F-F':
+        agents = create_fixedtime_agents(world, time=30)
+        env = create_env(world, agents)
+        fixedtime_execute(logger, env, agents, action_interval, relation)
 
     elif args.control == 'M-M':
         agents = create_maxp_agents(world)
@@ -131,7 +135,7 @@ if __name__ == "__main__":
         app1maxp_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix)
 
     elif args.control == 'S-S-O':
-        agents = create_sdqn_agents(world)
+        agents = create_sdqn_agents(world, mask_pos)
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
@@ -146,11 +150,10 @@ if __name__ == "__main__":
         mask_matrix = get_mask_matrix(relation, mask_pos)
         app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir)
         
-    elif test_type == 'S-S-A':
-        agents = create_sdqn_agents(world)
+    elif args.control == 'S-S-A':
+        agents = create_sdqn_agents(world, mask_pos=[])
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
         app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir)
-

@@ -9,6 +9,7 @@ class FixedTimeAgent(BaseAgent):
         super().__init__(action_space)
 
         self.iid = iid
+        self.sub_agents = 1
         self.idx = idx
         self.name = self.__class__.__name__
 

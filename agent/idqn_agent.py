@@ -36,6 +36,7 @@ class IDQNAgent(RLAgent):
         super().__init__(action_space, ob_generator, reward_generator)
         
         self.iid = iid
+        self.sub_agents = 1
         self.idx = idx
         self.name = self.__class__.__name__
 
