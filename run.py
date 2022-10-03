@@ -28,11 +28,11 @@ parser.add_argument('--episodes', type=int, default=100, help='training episodes
 
 parser.add_argument('-impute', default='sfm')
 parser.add_argument('-agent', default='dqn')
-parser.add_argument('-control', default='F-F', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
-parser.add_argument('--prefix', default='0', type=str)
+parser.add_argument('-control', default='I-F', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
+parser.add_argument('--prefix', default='final_test', type=str)
 
 parser.add_argument('--debug', action='store_true')
-parser.add_argument('--mask_pos', default='', type=str)
+parser.add_argument('--mask_pos', default='1,5,10', type=str)
 
 
 if __name__ == "__main__":

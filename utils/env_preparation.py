@@ -255,13 +255,13 @@ def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, 
     states, phases = list(zip(*obs))
     states = np.array(states, dtype=np.float32)
     phases = np.array(phases, dtype=np.int8)
+    recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    record.add(phases, recovered)
     for i in range(3600):
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
             actions = []
-            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-            record.add(phases, recovered)
             for ag in agents:
                 action = ag.get_action(recovered, phases, relation)
                 actions.append(action)
@@ -271,6 +271,8 @@ def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, 
             states, phases = list(zip(*obs))
             states = np.array(states, dtype=np.float32)
             phases = np.array(phases, dtype=np.int8)
+            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            record.add(phases, recovered)
     att = env.eng.get_average_travel_time()
     mse = record.get_cur_result()
     record.update()
@@ -317,6 +319,8 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
         last_states, last_phases = list(zip(*last_obs))
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
+        last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+        record.add(last_states, last_recovered)
         episodes_rewards = [0 for _ in agents]
         i = 0
         episodes_decision_num = 0
@@ -324,8 +328,6 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
             if i % action_interval == 0:
                 # TODO: implement other State inference model later
                 # SFM inference states
-                last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-                record.add(last_states, last_recovered)
                 actions = []
                 for agent_id, agent in enumerate(agents):
                     if agent.name == 'MaxPressureAgent':
@@ -355,6 +357,7 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
                 last_states, last_phases = list(zip(*last_obs))
                 last_states = np.array(last_states, dtype=np.float32)
                 last_phases = np.array(last_phases, dtype=np.int32)
+                last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             for agent_id, agent in enumerate(agents):
                 if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
                     agent.replay()
@@ -381,31 +384,31 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     else:
         env.eng.set_save_replay(False)
     i = 0
-    last_obs = env.reset()
-    last_states, last_phases = list(zip(*last_obs))
-    last_states = np.array(last_states, dtype=np.float32)
-    last_phases = np.array(last_phases, dtype=np.int8)
+    obs = env.reset()
+    states, phases = list(zip(*obs))
+    states = np.array(states, dtype=np.float32)
+    phases = np.array(phases, dtype=np.int8)
+    recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    record.add(states, recovered)
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
-            last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-            record.add(last_states, last_recovered)
             actions = []
             for ag in agents:
                 if ag.name == 'MaxPressureAgent':
-                    action = ag.get_action(last_recovered, last_phases, relation)
+                    action = ag.get_action(recovered, phases, relation)
                 elif ag.name == 'IDQNAgent':
-                    action = ag.get_action(last_states, last_phases)
+                    action = ag.get_action(states, phases)
                 actions.append(action)
             for _ in range(action_interval):
                 obs, _, _, _ = env.step(actions)
                 i += 1
             
-            last_obs = obs
-            last_states, last_phases = list(zip(*last_obs))
-            last_states = np.array(last_states, dtype=np.float32)
-            last_phases = np.array(last_phases, dtype=np.int8)
+            states, phases = list(zip(*obs))
+            states = np.array(states, dtype=np.float32)
+            phases = np.array(phases, dtype=np.int8)
+            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
 
     cur_mse = record.get_cur_result()
     record.update()
@@ -517,13 +520,13 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
     obs = env.reset()
     states, phases = list(zip(*env.reset()))
     states = np.array(states, dtype = np.float32)
-    phases = np.array(phases, dtype = np.int8)   
+    phases = np.array(phases, dtype = np.int8)
+    recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    record.add(states, recovered)
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
-            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-            record.add(states, recovered)
             for ag in agents:
                 actions = ag.get_action(recovered, phases, relation)
             for _ in range(action_interval):
@@ -532,6 +535,8 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
             states, phases = list(zip(*obs))
             states = np.array(states, dtype = np.float32)
             phases = np.array(phases, dtype = np.int8)
+            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
     record.update()
@@ -664,13 +669,13 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
     obs = env.reset()
     states, phases = list(zip(*obs))
     states = np.array(states, dtype = np.float32)
-    phases = np.array(phases, dtype = np.int8)   
+    phases = np.array(phases, dtype = np.int8)
+    recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    record.add(states, recovered)
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
-            recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-            record.add(states, recovered)
             actions = []
             for ag in agents:
                 action = ag.get_action(recovered, phases, relation)
@@ -681,6 +686,8 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
             states, phases = list(zip(*obs))
             states = np.array(states, dtype = np.float32)
             phases = np.array(phases, dtype = np.int8)
+            recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
     record.update()
@@ -794,13 +801,13 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     obs = env.reset()
     states, phases = list(zip(*env.reset()))
     states = np.array(states, dtype = np.float32)
-    phases = np.array(phases, dtype = np.int8)   
+    phases = np.array(phases, dtype = np.int8)
+    recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    record.add(states, recovered)
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
-            recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-            record.add(states, recovered)
             actions = []
             for ag in agents:
                 actions = ag.get_action(recovered, phases, relation)
@@ -810,6 +817,8 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
             states, phases = list(zip(*obs))
             states = np.array(states, dtype = np.float32)
             phases = np.array(phases, dtype = np.int8)
+            recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
     record.update()

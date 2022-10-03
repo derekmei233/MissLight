@@ -49,7 +49,7 @@ class TSCEnv(gym.Env):
         [obs.extend(ag.get_ob()) if ag.sub_agents != 1 else obs.append(ag.get_ob()) for ag in self.agents]
         reward = []
         # TODO: rank it (currently there is no need)
-        [reward.extend(ag.get_reward()) if ag.sub_agents != 1 else obs.append(ag.get_reward()) for ag in self.agents]
+        [reward.extend(ag.get_reward()) if ag.sub_agents != 1 else reward.append(ag.get_reward()) for ag in self.agents]
         dones = [False] * self.n
         # infos = {"metric": self.metric.update()}
         infos = {}

@@ -17,7 +17,7 @@ class IDQN(nn.Module):
         super(IDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
         self.dense_2 = nn.Linear(20, 20)
-        self.dense_3 = nn.Linear(20, 8)
+        self.dense_3 = nn.Linear(20, size_out)
     def _forward(self, x):
         x = F.relu(self.dense_1(x))
         x = F.relu(self.dense_2(x))
@@ -44,8 +44,8 @@ class IDQNAgent(RLAgent):
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)
 
-        self.memory = deque(maxlen=5000)
-        self.learning_start = 1000
+        self.memory = deque(maxlen=10000)
+        self.learning_start = 2000
         self.update_model_freq = 1
         self.update_target_model_freq = 20
         self.gamma = 0.95  # discount rate
