@@ -12,7 +12,7 @@ import configparser
 from predictionModel.ASTGCN_r import make_model
 from metric.utils import compute_val_loss_mstgcn, predict_and_save_results_mstgcn
 from prepareData import load_graphdata_channel, get_road_adj, read_output
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 from metric.metrics import masked_mse
 
 

@@ -19,13 +19,13 @@ def store_reshaped_data(data, information):
         phase_tp = np.concatenate((phase_tp, information[2][i][1][np.newaxis, :]), axis = 0)
     data.append([state_t, phase_t, reward, state_tp, phase_tp])
 
-def generate_dataset(file, phases=8, infer='st'):
-    # prepare data for training inference model
+def generate_reward_dataset(file, phases=8, infer='NN_st'):
+    # prepare data for training reward_inference model
     # data formation [N_samples, [state_t, phase_t, reward, state_tp, phase_tp]]
     # TODO: need aggregated and separate rewards
     with open(file, 'rb') as f:
         contents = pkl.load(f)
-    if infer == 'st':
+    if infer == 'NN_st':
         # training sample [state_t, onehot(phase_t)], target [reward]
         feature = list()
         target = list()
@@ -33,7 +33,7 @@ def generate_dataset(file, phases=8, infer='st'):
             feature_t = np.concatenate((sample[0], one_hot(sample[1], phases)), axis=1)
             feature.append(feature_t)
             target.append(np.mean(sample[2], axis = 1))
-    elif infer == 'stp':
+    elif infer == 'NN_stp':
         feature = list()
         target = list()
         for sample in contents:
@@ -51,3 +51,5 @@ def generate_dataset(file, phases=8, infer='st'):
     y_test = target[sample_idx[int(0.8 * total_idx) :]]
     dataset = {'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test}
     return dataset
+
+#def generate_state_data(file, phases=8):

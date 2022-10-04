@@ -26,7 +26,7 @@ class NN_predictor(object):
     def predict(self, x):
         return self.model.forward(x)
     
-    def train(self, x_train, y_train, x_test, y_test, epochs=100):
+    def train(self, x_train, y_train, x_test, y_test, epochs):
         train_loss = 0.0
         test_loss = 0.0
         best_loss = np.inf

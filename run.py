@@ -1,21 +1,23 @@
 from predictionModel.NN import NN_predictor
 from predictionModel.SFM import SFM_predictor
 
-from agent.idqn_agent import IDQNAgent
-from agent.fixedtime_agent import FixedTimeAgent
 import pickle as pkl
 from utils.preparation import build_relation, get_road_adj, get_mask_matrix, fork_config
-from rl_data_generation import store_reshaped_data, generate_dataset
-from utils.env_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents, create_app1maxp_agents, create_idqn_agents,\
-    create_maxp_agents, create_sdqn_agents, fixedtime_execute, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, naive_train, maxp_execute
+from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents, create_app1maxp_agents, create_idqn_agents,\
+    create_maxp_agents, create_sdqn_agents
+from utils.data_generation import generate_reward_dataset
+from utils.control import fixedtime_execute, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, naive_train, maxp_execute
 from utils.mask_pos import random_mask
 import argparse
 import os
 from datetime import datetime
 import logging
-import numpy as np
 import torch
 
+
+REWARD_TYPE = 'NN_st'
+SAVE_RATE = 10
+EPOCHS = 10
 
 # TODO: test on different reward impute(t or pt) first
 # TODO: var = [Imputation/Agent/Control/prefix]
@@ -23,20 +25,19 @@ parser = argparse.ArgumentParser(description='IDQN - FixedTime generate dataset 
 parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
-parser.add_argument('--fix_time', type=int, default=30, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=100, help='training episodes')
+parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
+parser.add_argument('--episodes', type=int, default=10, help='training episodes')
 
 parser.add_argument('-impute', default='sfm')
 parser.add_argument('-agent', default='dqn')
-parser.add_argument('-control', default='I-F', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
-parser.add_argument('--prefix', default='final_test', type=str)
+parser.add_argument('-control', default='S-S-A', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
+parser.add_argument('--prefix', default='working', type=str)
 
 parser.add_argument('--debug', action='store_true')
-parser.add_argument('--mask_pos', default='1,5,10', type=str)
+parser.add_argument('--mask_pos', default='2,8', type=str)
 
 
 if __name__ == "__main__":
-
     # save replay if debug == True, default False
     args = parser.parse_args()
     config = args.config
@@ -80,7 +81,8 @@ if __name__ == "__main__":
     #sh.setLevel(logging.INFO)
     logger.addHandler(fh)
     #logger.addHandler(sh)
-    save_file = os.path.join(state_dir, f'state_reward.pkl')
+    save_reward_file = os.path.join(state_dir, f'state_reward.pkl')
+    save_state_file = os.path.join(state_dir, f'state_phase.pkl')
 
     if saveReplay:
         config_file = fork_config(config_file, replay_dir)
@@ -101,16 +103,21 @@ if __name__ == "__main__":
         # environment preparation, in_dim == 20 [lanes:3 * roads:4 + phases:8] = 20
         input_dim = 20
 
-        if not os.path.isfile(save_file):
+        if not os.path.isfile(save_reward_file):
             print('start test nn predictor \n')
-            info = naive_train(logger, env, gen_agents, episodes, action_interval)
+            info, raw_state = naive_train(logger, env, gen_agents, episodes, action_interval, save_rate=SAVE_RATE)
             # save inference training raw data
-            with open(save_file, 'wb') as f:
+            with open(save_reward_file, 'wb') as f:
                 pkl.dump(info, f)
-        dataset = generate_dataset(save_file, 8) # default setting infer == 'st'
+            
+            with open(save_state_file, 'wb') as f:
+                pkl.dump(raw_state, f)
+
+        reward_dataset = generate_reward_dataset(save_reward_file, 8, infer=REWARD_TYPE) # default setting infer == 'st'
+        #state_dataset = generate_state_dataset()
         net = NN_predictor(input_dim, 1, 'cpu', model_dir) # generate reward inference model at model_dir
-        net.train(dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'], 10)
-        test = net.predict(torch.from_numpy(dataset['x_train'][11]).to('cpu'))
+        net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
+        test = net.predict(torch.from_numpy(reward_dataset['x_train'][11]).to('cpu'))
 
     elif args.control =='F-F':
         agents = create_fixedtime_agents(world, time=30)
@@ -132,7 +139,7 @@ if __name__ == "__main__":
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        app1maxp_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix)
+        app1maxp_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE)
 
     elif args.control == 'S-S-O':
         agents = create_sdqn_agents(world, mask_pos)
@@ -140,7 +147,7 @@ if __name__ == "__main__":
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        app1_trans_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix)
+        app1_trans_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE)
     
     elif args.control == 'I-I':
         agents = create_idqn_agents(world)
@@ -148,12 +155,12 @@ if __name__ == "__main__":
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir)
-        
+        app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, save_rate=SAVE_RATE)
+
     elif args.control == 'S-S-A':
         agents = create_sdqn_agents(world, mask_pos=[])
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir)
+        app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE,save_rate=SAVE_RATE)

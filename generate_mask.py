@@ -1,6 +1,6 @@
 from utils.mask_pos import random_mask
 from utils.preparation import build_relation
-from utils.env_preparation import create_world
+from utils.control import create_world
 import os
 
 

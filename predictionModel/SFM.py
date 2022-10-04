@@ -1,10 +1,4 @@
-import pickle
-import os
-
 from utils.preparation import get_road_adj, inter2edge_slice, mask_op, get_mask_matrix, reconstruct_data_slice
-import numpy as np
-#from metric.metrics import mae, rmse, mape
-
 
 
 # sfm_prediction only needs one time slice, redesign mask_op and construct_data

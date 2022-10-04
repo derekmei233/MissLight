@@ -91,7 +91,7 @@ class SDQNAgent(RLAgent):
             act_values = self.model.forward(obs, train=False)
             actions.append(torch.argmax(act_values))
         return actions
-    
+
     def get_ob(self):
         obs = tuple([self.ob_generator[i][0].generate(), np.array(self.ob_generator[i][1].generate())]
          for i in range(self.sub_agents))
