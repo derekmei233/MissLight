@@ -98,7 +98,7 @@ if __name__ == "__main__":
     logger.info(f"mask_pos: {mask_pos}")
 
     if args.control == 'I-F':
-        gen_agents = create_preparation_agents(world, mask_pos)
+        gen_agents = create_preparation_agents(world, mask_pos,time=args.fix_time)
         env = create_env(world, gen_agents)
         # environment preparation, in_dim == 20 [lanes:3 * roads:4 + phases:8] = 20
         input_dim = 20
