@@ -1,7 +1,7 @@
 import numpy as np
 import random
 import pickle as pkl
-from utils.preparation import one_hot
+from utils.preparation import one_hot, get_road_adj
 
 
 def store_reshaped_data(data, information):
@@ -52,4 +52,84 @@ def generate_reward_dataset(file, phases=8, infer='NN_st'):
     dataset = {'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test}
     return dataset
 
-#def generate_state_data(file, phases=8):
+def build_road_state(raw_state, relation, mask_pos):
+    '''
+    only support RIGHT, 4 road 3 lane, 8 phase intersections
+    '''
+    inter_dict_id2inter = relation['inter_dict_id2inter']
+    inter_in_roads = relation['inter_in_roads']
+    road_dict_road2id = relation['road_dict_road2id']
+
+    num_roads = len(road_dict_road2id)
+    net_shape = relation['net_shape']
+    
+    # mask position and convertion from intersection to road structure
+    adj_road = get_road_adj(relation)
+    road_update = np.zeros(int(num_roads), dtype=np.int8)
+    all_road_feature = []
+    for epoch_state in raw_state:
+        road_feature = np.zeros((len(epoch_state), int(num_roads), 11), dtype=np.float32)
+        for  id_time, step_dict in enumerate(epoch_state):
+            for id_node, node_dict in enumerate(step_dict):
+                obs = node_dict[0]
+                phase = one_hot(node_dict[1], 8)
+                direction = []
+                assert(len(obs)==12), 'only support 3 lanes road in [left, strait, right] order and [N,E,S,W] order'
+                direction.append(np.concatenate([obs[0:3], phase]))
+                direction.append(np.concatenate([obs[3:6], phase]))
+                direction.append(np.concatenate([obs[6:9], phase]))
+                direction.append(np.concatenate([obs[9:], phase]))
+
+                in_roads = inter_in_roads[inter_dict_id2inter[id_node]]
+                for id_road, road in enumerate(in_roads):
+                    road_id = road_dict_road2id[road]
+                    road_feature[id_time][road_id] = direction[id_road]
+                    if id_time == 0:
+                        if id_node in mask_pos:
+                            road_update[road_id] = 2
+                        else:
+                            road_update[road_id] = 1
+        all_road_feature.append(road_feature)
+    road_info = {'road_feature': np.array(all_road_feature, dtype=np.float32), 'road_update': road_update, 'adj_road': adj_road}
+    return road_info
+
+def time_helper(cur_t, history_t):
+    '''
+    notice cur_t is the time shift, t=0 is the start point
+    end index = real pos + 1
+    start index = max(real pos + 1 - interval, 0)
+    '''
+    if cur_t - history_t + 1 <= 0:
+        start_t = 0
+    else:
+        start_t = cur_t - history_t + 1
+    end_t = cur_t + 1
+    target_t = end_t + 1
+    return start_t, end_t
+
+def generate_state_dataset(state_file, history_t):
+    '''
+    This function is used for generating data directly used for training GraphWaveNet-r-f
+    tans_config stored the hyperparameter used for generating dataset
+    return sample should be [1, N, F, T], default = [1, 80, 4, 10]
+    process: [sample, target] -> norm -> data for model_new -> 
+    '''
+    with open(state_file, 'rb') as f:
+        seq_data = np.load(f)
+        update_rule = np.load(f)
+        adj_matrix = np.load(f)
+    all_sample = []
+    for epoch_data in seq_data[:, :, :-1]:
+        for cur_t in range(epoch_data.shape[0]):
+            sample = np.zeros((1, 80, 11), dtype=np.float32)
+            start, end = time_helper(cur_t, history_t)
+            sample[:, :, start-end:] = epoch_data[:, :, start:end]
+            label = epoch_data[:, :, end]
+            all_sample.append((sample, label))
+
+            # imputation with SFM as default
+            
+    
+
+
+

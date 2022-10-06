@@ -506,7 +506,8 @@ def mask_op(data, mask_matrix, adj_matrix, data_construct):
     :return:(N,F): inference value( -1 at observable position)
     '''
     # avoid inplace replacement
-    data_or = -1 * np.ones_like(data, dtype=np.float32)
+    # data_or = -1 * np.ones_like(data, dtype=np.float32) for debug use only
+    data_or = np.zeors_like(data, dtype=np.float32)
     if data_construct == 'select':
         for mask_id, value in enumerate(mask_matrix):
             if value != 1:
@@ -523,20 +524,20 @@ def mask_op(data, mask_matrix, adj_matrix, data_construct):
                     rand_id = random.randint(0, len(mask_matrix)-1)
                     while mask_matrix[rand_id] != 1:
                         rand_id = random.randint(0, len(mask_matrix)-1)
-                    data_or[mask_id, :3] = data[rand_id, :3].copy()
+                    data_or[mask_id, :3] = data[rand_id, :3]
                 if value == 0:
                     # set virtual node's phase
                     rand_id = random.sample(neighbors, 1)[0]
-                    data_or[mask_id, 3:] = data[rand_id, 3:].copy()
+                    data_or[mask_id, 3:] = data[rand_id, 3:]
     else:
         for mask_id, value in enumerate(mask_matrix):
             if value != 1:
                 rand_id = random.randint(0, len(mask_matrix)-1)
                 while mask_matrix[rand_id] != 1:
                     rand_id = random.randint(0, len(mask_matrix)-1)
-                data_or[mask_id, :3] = data[rand_id, :3].deepcopy()
+                data_or[mask_id, :3] = data[rand_id, :3]
                 if value == 0:
-                    data_or[mask_id, 3:] = data[rand_id, 3:].deepcopy()
+                    data_or[mask_id, 3:] = data[rand_id, 3:]
     return data_or
 
 def inter2edge_slice(relation, states, phases, mask_pos):
@@ -551,7 +552,8 @@ def inter2edge_slice(relation, states, phases, mask_pos):
     # states: [N_node, N_features] -> edge: [N_edge, 11]
     # only support phase space equal to 8
     if phases is not None:
-        masked_x = -1 * np.ones((num_roads, 11), dtype=np.float32)
+        # masked_x = -1 * np.ones((num_roads, 11), dtype=np.float32) for debug only
+        masked_x = np.zeros((num_roads, 11), dtype=np.float32)
         phases_oh = one_hot(phases, 8)
         for id_node, ob_length in enumerate(states):
             if id_node in mask_pos:
@@ -576,7 +578,8 @@ def inter2edge_slice(relation, states, phases, mask_pos):
                     masked_x[road_id] = direction[id_road]
                 # convert finished, -1 at masked positions
     else:
-        masked_x = -1 * np.ones((num_roads, 3), dtype=np.float32)
+        #masked_x = -1 * np.ones((num_roads, 3), dtype=np.float32) for debug only
+        masked_x = np.zeros((num_roads, 11), dtype=np.float32)
         for id_node, ob_length in enumerate(states):
             if id_node in mask_pos:
                 inter = inter_dict_id2inter[id_node]

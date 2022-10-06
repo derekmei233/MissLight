@@ -12,7 +12,8 @@ class SFM_predictor(object):
     def predict(self, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select'):
         masked = inter2edge_slice(relation, states, phases, mask_pos)
         infer = mask_op(masked, mask_matrix, adj_matrix, mode)
-        edge_feature = infer * masked * -1
+        #edge_feature = infer * masked * -1 for debug use only
+        edge_feature = infer + masked
         prediction = reconstruct_data_slice(edge_feature, phases, relation)
         return prediction
 
