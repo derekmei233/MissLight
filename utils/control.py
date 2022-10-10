@@ -516,6 +516,105 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
     logger.info('-' * 50)
     return record
 
+# I-FRAP
+def app2_frap_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
+    logger.info(f"IDQN - FRAPDQN control")
+    logger.info(f"reward inference model: {reward_type}")
+    if reward_type == 'SFM':
+        reward_inference_net = SFM_predictor()
+    elif reward_type == 'NN_st' or reward_type == 'NN_stp':
+        reward_inference_net = NN_predictor(agents[0].ob_length, 1, 'cpu', model_dir)
+        reward_inference_net.load_model()
+    else:
+        raise RuntimeError('not implemented yet')
+    total_decision_num = 0
+    best_att = np.inf
+    record = MSEMetric('state mse', mask_pos)
+    reward_record = MSEMetric('reward mse', mask_pos)
+    for e in range(episode):
+        last_obs = env.reset()
+        last_states, last_phases = list(zip(*last_obs))
+        last_states = np.array(last_states, dtype=np.float32)
+        last_phases = np.array(last_phases, dtype=np.int8)
+        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        record.add(last_states, last_recovered)
+        episodes_decision_num = 0
+        episodes_rewards = [0 for _ in agents]
+        i = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                actions = []
+                for ag in agents:
+                    if total_decision_num > ag.learning_start:
+                        #print(last_recovered.shape)
+                        action = ag.choose(last_recovered, last_phases)
+                        actions.append(action)
+                    else:
+                        action = ag.sample()
+                        actions.append(action)
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, dones, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards_train = np.mean(rewards_list, axis=0)
+                rewards = np.mean(rewards_train, axis=1)
+                if reward_type == 'SFM':
+                    # TODO: check later
+                    rewards_predicted = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards_recovered = np.mean(rewards_predicted, axis=1)
+                    reward_record.add(rewards, rewards_recovered)
+                elif reward_type == 'NN_st':
+                    rewards_recovered = rewards.copy()
+                    for pos in mask_pos:
+                        tmp = reward_inference_net.predict(torch.from_numpy(np.concatenate((last_recovered[pos], one_hot(last_phases[pos], agents[pos].action_space.n)))))
+                        rewards_recovered[pos] = tmp
+                    reward_record.add(rewards, rewards_recovered)
+                elif reward_type == 'NN_stp':
+                    # TODO: implement later
+                    raise RuntimeError("not implemented")
+                else:
+                    raise RuntimeError("not implemented")
+                cur_states, cur_phases = list(zip(*obs))
+                cur_states = np.array(cur_states, dtype=np.float32)
+                cur_phases = np.array(cur_phases, dtype=np.int8)
+                cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                record.add(cur_states, cur_recovered)
+                for agent_id, agent in enumerate(agents):
+                    agent.remember(
+                        (last_recovered[agent_id], last_phases[agent_id]), actions[agent_id], rewards_recovered[agent_id], (cur_recovered[agent_id], cur_phases[agent_id]))
+                    episodes_rewards[agent_id] += rewards_recovered[agent_id]
+                    episodes_decision_num += 1
+                total_decision_num += 1
+                last_obs = obs
+                last_states = cur_states
+                last_phases = cur_phases
+                last_recovered = cur_recovered
+            for agent_id, ag in enumerate(agents):
+                # only use experiences at observable intersections
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
+                    ag.replay()
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
+                    ag.update_target_network()
+        cur_mse = record.get_cur_result()
+        reward_cur_mse = reward_record.get_cur_result()
+        record.update()
+        reward_record.update()
+        logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
+        logger.info("episode:{}, Reward_MSETrain:{}".format(e, reward_cur_mse))
+
+        best_att = app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
+    avg_mse = record.get_result()
+    reward_avg_mse = record.get_result()
+    logger.info(f'approach 2: concurrent frapdqn average travel time result: {best_att}')
+    logger.info(f'final mse is: {avg_mse}')
+    logger.info(f'final reward mse is: {reward_avg_mse}')
+    logger.info('-' * 50)
+    return record
+
+
+
 # S-S-A
 def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
     if e % save_rate == save_rate - 1:
