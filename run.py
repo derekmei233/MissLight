@@ -4,9 +4,9 @@ from predictionModel.SFM import SFM_predictor
 import pickle as pkl
 from utils.preparation import build_relation, get_road_adj, get_mask_matrix, fork_config
 from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents, create_app1maxp_agents, create_idqn_agents,\
-    create_maxp_agents, create_sdqn_agents
+    create_maxp_agents, create_sdqn_agents,create_frap_agents
 from utils.data_generation import generate_reward_dataset, build_road_state, generate_state_dataset
-from utils.control import fixedtime_execute, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, naive_train, maxp_execute
+from utils.control import fixedtime_execute, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, naive_train, maxp_execute,app2_frap_train
 from utils.mask_pos import random_mask
 import argparse
 import os
@@ -162,6 +162,14 @@ if __name__ == "__main__":
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
         app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, save_rate=SAVE_RATE)
+    
+    elif args.control == 'I-FRAP':
+        agents = create_frap_agents(world)
+        env = create_env(world, agents)
+        state_inference_net = SFM_predictor()
+        adj_matrix = get_road_adj(relation)
+        mask_matrix = get_mask_matrix(relation, mask_pos)
+        app2_frap_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, save_rate=SAVE_RATE)
 
     elif args.control == 'S-S-A':
         agents = create_sdqn_agents(world, mask_pos=[])
