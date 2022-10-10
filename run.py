@@ -32,7 +32,7 @@ parser.add_argument('--episodes', type=int, default=10, help='training episodes'
 
 parser.add_argument('-impute', default='sfm')
 parser.add_argument('-agent', default='dqn')
-parser.add_argument('-control', default='S-S-A', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O'])
+parser.add_argument('-control', default='S-S-A', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O','I-FRAP'])
 parser.add_argument('--prefix', default='working', type=str)
 
 parser.add_argument('--debug', action='store_true')
