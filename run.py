@@ -32,7 +32,7 @@ parser.add_argument('--episodes', type=int, default=10, help='training episodes'
 
 parser.add_argument('-impute', default='sfm')
 parser.add_argument('-agent', default='dqn')
-parser.add_argument('-control', default='S-S-A', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O','I-FRAP'])
+parser.add_argument('-control', default='S-S-A', choices=['I-I', 'I-F', 'I-M','M-M','S-S-A','S-S-O','FRAP-F'])
 parser.add_argument('--prefix', default='working', type=str)
 
 parser.add_argument('--debug', action='store_true')
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         mask_matrix = get_mask_matrix(relation, mask_pos)
         app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, save_rate=SAVE_RATE)
     
-    elif args.control == 'I-FRAP':
+    elif args.control == 'FRAP-F':
         agents = create_frap_agents(world)
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
