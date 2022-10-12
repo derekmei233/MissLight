@@ -114,19 +114,30 @@ def create_idqn_agents(world):
         ))
     return agents
 
-def create_frap_agents(world):
+def create_frap_agents(world,mask_pos,time):
     agents = []
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
-        agents.append(FRAP_DQNAgent(
-            action_space,
-            [
-                LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
-            ],
-            LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
-            i.id, idx
-        ))
+        if idx not in mask_pos:
+            agents.append(FRAP_DQNAgent(
+                action_space,
+                [
+                    LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
+                    IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                ],
+                LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+                i.id, idx
+            ))
+        else:
+            agents.append(FixedTimeAgent(
+                action_space,
+                [
+                    LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
+                    IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                ],
+                LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+                i.id, idx,time=time
+            ))
     return agents
 
 def create_sdqn_agents(world, mask_pos):
