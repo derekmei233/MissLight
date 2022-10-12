@@ -557,9 +557,9 @@ def app2_frap_train(logger, env, agents, episodes, action_interval, inference_ne
                 rewards_train = np.mean(rewards_list, axis=0)
                 rewards = np.mean(rewards_train, axis=1)
                 for agent_id, agent in enumerate(agents):
-                    #if agent.name == 'FixedTimeAgent':
-                        #pass
-                    #else:
+                    if agent.name == 'FixedTimeAgent':
+                        pass
+                    else:
                         # no imputation, use obs directly
                         agent.remember(last_obs[agent_id], actions[agent_id], rewards[agent_id], obs[agent_id]) # okay
                         episodes_rewards[agent_id] += rewards[agent_id]
@@ -620,7 +620,7 @@ def frap_execute(logger, env, agents, e, best_att, information, state_raw_data, 
             rewards =  np.mean(rewards_train, axis=1)
             save_state.append(obs)
             for agent_id, agent in enumerate(agents):
-                if agent.name == 'FRAP_DQNAgent':
+                if agent.name == 'FixedTimeAgent':
                     pass
                 else:
                     episodes_rewards[agent_id] += rewards[agent_id]
