@@ -17,7 +17,7 @@ import torch
 def fixedtime_execute(logger, env, agents, action_interval, relation):
     env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
-    save_dir = name[name.index('/output_data'): name.index('/logging')]
+    save_dir = name[name.index('\output_data'): name.index('\logging')]
     env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_0.txt"))
     logger.info(f"FixedTime - FixedTime control")
     i = 0
@@ -115,7 +115,7 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
     if e % save_rate == save_rate - 1:
         env.eng.set_save_replay(True)
         name = logger.handlers[0].baseFilename
-        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        save_dir = name[name.index('\output_data'): name.index('\logging')]
         env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
     else:
         env.eng.set_save_replay(False)
@@ -168,7 +168,7 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
 def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix):
     env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
-    save_dir = name[name.index('/output_data'): name.index('/logging')]
+    save_dir = name[name.index('\output_data'): name.index('\logging')]
     env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_0.txt"))
     logger.info(f"Max Pressure - Max Pressure control")
     i = 0
@@ -276,7 +276,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     if e % save_rate == save_rate - 1:
         env.eng.set_save_replay(True)
         name = logger.handlers[0].baseFilename
-        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        save_dir = name[name.index('\output_data'): name.index('\logging')]
         env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
     else:
         env.eng.set_save_replay(False)
@@ -293,6 +293,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
             # SFM inference states
             actions = []
             for ag in agents:
+                #if ag.name == 'MaxPressureAgent':
                 if ag.name == 'MaxPressureAgent':
                     action = ag.get_action(recovered, phases, relation)
                 elif ag.name == 'IDQNAgent':
@@ -386,7 +387,7 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
     if e % save_rate == save_rate - 1:
         env.eng.set_save_replay(True)
         name = logger.handlers[0].baseFilename
-        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        save_dir = name[name.index('\output_data'): name.index('\logging')]
         env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
     else:
         env.eng.set_save_replay(False)
@@ -516,7 +517,7 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
     logger.info('-' * 50)
     return record
 
-# I-FRAP
+#IDQN-FRAP_DQN
 def app2_frap_train(logger, env, agents, episodes, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
     # take in environment and generate data for inference net
     # save t, phase_t, rewards_tp, state_tp, phase_tp(action_t) into dictionary
@@ -640,15 +641,12 @@ def frap_execute(logger, env, agents, e, best_att, information, state_raw_data, 
     logger.info("episode:{}, Test:{}".format(e, att))
     return best_att
 
-
-
-
-# S-S-A
+#S-S-O
 def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
     if e % save_rate == save_rate - 1:
         env.eng.set_save_replay(True)
         name = logger.handlers[0].baseFilename
-        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        save_dir = name[name.index('\output_data'): name.index('\logging')]
         env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
     else:
         env.eng.set_save_replay(False)
@@ -780,7 +778,7 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     if e % save_rate == save_rate - 1:
         env.eng.set_save_replay(True)
         name = logger.handlers[0].baseFilename
-        save_dir = name[name.index('/output_data'): name.index('/logging')]
+        save_dir = name[name.index('\output_data'): name.index('\logging')]
         env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_%s.txt" % e))
     else:
         env.eng.set_save_replay(False)
@@ -814,3 +812,96 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     return best_att
+
+
+def app2_fsa_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
+    # this method is used in approach 1 ,transfer and approach 2, shared-parameter.
+    logger.info(f"FRAPS - A control")
+    logger.info(f"reward inference model: {reward_type}")
+    if reward_type == 'SFM':
+        reward_inference_net = SFM_predictor()
+    elif reward_type == 'NN_st' or reward_type == 'NN_stp':
+        reward_inference_net = NN_predictor(agents[0].ob_length, 1, 'cpu', model_dir)
+        reward_inference_net.load_model()
+    else:
+        raise RuntimeError('not implemented yet')
+
+    total_decision_num = 0
+    best_att = np.inf
+    record = MSEMetric('state mse', mask_pos)
+    reward_record = MSEMetric('reward mse', mask_pos)
+    for e in range(episode):
+        last_obs = env.reset()
+        last_states, last_phases = list(zip(*last_obs))
+        last_states = np.array(last_states, dtype=np.float32)
+        last_phases = np.array(last_phases, dtype=np.int8)
+        # only recover state_t since we need this var to determine action t
+        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        record.add(last_states, last_recovered)
+        episodes_decision_num = 0
+        episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
+        i = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                for ag in agents:
+                    if total_decision_num > ag.learning_start:
+                        actions = ag.choose(last_recovered, last_phases, relation)
+                    else:
+                        actions = ag.sample()
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, dones, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards_train = np.mean(rewards_list, axis=0)
+                rewards = np.mean(rewards_train, axis=1)
+                if reward_type == 'SFM':
+                    rewards_predicted = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards_recovered = np.mean(rewards_predicted, axis=1)
+                    reward_record.add(rewards, rewards_recovered)
+                elif reward_type == 'NN_st':
+                    rewards_recovered = rewards.copy()
+                    for pos in mask_pos:
+                        tmp = reward_inference_net.predict(torch.from_numpy(np.concatenate((last_recovered[pos], one_hot(last_phases[pos], agents[0].action_space.n)))))
+                        rewards_recovered[pos] = tmp
+                    reward_record.add(rewards, rewards_recovered)
+                elif reward_type == 'NN_stp':
+                    # TODO: implement later
+                    a = None
+                else:
+                    raise RuntimeError("not implemented")
+                cur_states, cur_phases = list(zip(*obs))
+                cur_states = np.array(cur_states, dtype=np.float32)
+                cur_phases = np.array(cur_phases, dtype=np.int8)
+                cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                record.add(cur_states, cur_recovered)
+                for ag in agents:
+                    for idx in ag.idx:
+                        ag.remember(
+                            (last_recovered[idx], last_phases[idx]), actions[idx], rewards_recovered[idx], (cur_recovered[idx], cur_phases[idx]), idx)
+                        episodes_rewards[idx] += rewards[idx]
+                        episodes_decision_num += 1
+                total_decision_num += 1
+                last_obs = obs
+                last_states = cur_states
+                last_phases = cur_phases
+                last_recovered = cur_recovered
+            for ag in agents:
+                # only use experiences at observable intersections
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
+                    ag.replay()
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
+                    ag.update_target_network()
+        cur_mse = record.get_cur_result()
+        reward_cur_mse = reward_record.get_cur_result()
+        record.update()
+        reward_record.update()
+        logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
+        logger.info("episode:{}, Reward_MSETrain:{}".format(e, reward_cur_mse))
+        best_att = app2_shared_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
+    avg_mse = record.get_result()
+    logger.info(f'approach 2: sharedfrap average travel time result: {best_att}')
+    logger.info(f'final mse is: {avg_mse}')
+    logger.info('-' * 50)
+    return record
