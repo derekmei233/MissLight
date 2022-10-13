@@ -62,7 +62,7 @@ if __name__ == "__main__":
     log_dir = os.path.join(cur_working_dir, log_dir)
     replay_dir = os.path.join(cur_working_dir, replay_dir)
 
-    reward_model_dir = os.path.join(root_dir, args.impute, args.agent, 'I-F', 'model')
+    reward_model_dir = os.path.join(root_dir, args.impute, args.agent, 'FRAP-F', 'model')   #change the strings this place (like 'I-F','FRAP-F')  to train different reward models
 
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
@@ -164,12 +164,27 @@ if __name__ == "__main__":
         app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, save_rate=SAVE_RATE)
     
     elif args.control == 'FRAP-F':
-        agents = create_frap_agents(world)
+        agents = create_frap_agents(world,mask_pos,time=args.fix_time)
         env = create_env(world, agents)
-        state_inference_net = SFM_predictor()
-        adj_matrix = get_road_adj(relation)
-        mask_matrix = get_mask_matrix(relation, mask_pos)
-        app2_frap_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, save_rate=SAVE_RATE)
+        #state_inference_net = SFM_predictor()
+        #adj_matrix = get_road_adj(relation)
+        #mask_matrix = get_mask_matrix(relation, mask_pos)
+        input_dim = 20
+
+        if not os.path.isfile(save_reward_file):
+            print('start test nn predictor \n')
+            info, raw_state = app2_frap_train(logger, env, agents, episodes, action_interval, save_rate=SAVE_RATE)
+            # save inference training raw data
+            with open(save_reward_file, 'wb') as f:
+                pkl.dump(info, f)
+
+            with open(save_state_file, 'wb') as f:
+                pkl.dump(raw_state, f)
+
+        reward_dataset = generate_reward_dataset(save_reward_file, 8,
+                                                 infer=REWARD_TYPE)  # default setting infer == 'st'
+        # state_dataset = generate_state_dataset()
+        net = NN_predictor(input_dim, 1, 'cpu', model_dir)  # generate reward inference model at model_dir
 
     elif args.control == 'S-S-A':
         agents = create_sdqn_agents(world, mask_pos=[])
