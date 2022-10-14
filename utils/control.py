@@ -41,12 +41,12 @@ def fixedtime_execute(logger, env, agents, action_interval, relation):
     return None
 
 # : I-F
-def naive_train(logger, env, agents, episodes, action_interval, save_rate):
+def naive_train(logger, env, agents, episodes, action_interval, save_rate,agent_name):
     # take in environment and generate data for inference net
     # save t, phase_t, rewards_tp, state_tp, phase_tp(action_t) into dictionary
     # collect data for training state inference model GraphWaveNet (obs for train and miss for eval)
     state_raw_data = []
-    logger.info(f" IDQN -  FixedTime control")
+    logger.info(f" Independent {agent_name} -  FixedTime control")
     information = []
     total_decision_num = 0
     best_att = np.inf
@@ -205,8 +205,8 @@ def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, 
     return record
 
 # I-M 
-def app1maxp_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
-    logger.info(f" IDQN - Max Pressure control")
+def app1maxp_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate,agent_name):
+    logger.info(f"Independent {agent_name} - Max Pressure control")
     total_decision_num = 0
     best_att = np.inf
     record = MSEMetric('state mse', mask_pos)
@@ -296,7 +296,8 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
                 #if ag.name == 'MaxPressureAgent':
                 if ag.name == 'MaxPressureAgent':
                     action = ag.get_action(recovered, phases, relation)
-                elif ag.name == 'IDQNAgent':
+                ## elif ag.name =='IDQNAgent':
+                else:
                     action = ag.get_action(recovered, phases)
                 actions.append(action)
             for _ in range(action_interval):
@@ -318,9 +319,9 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     return best_att
 
 # S-S-O
-def app1_trans_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
+def app1_trans_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate,agent_name):
     # this method is used in approach 1 ,transfer and approach 2, shared-parameter. 
-    logger.info(f"SDQN - SDQN - O control") 
+    logger.info(f"SHARED {agent_name} - O control")
     total_decision_num = 0
     best_att = np.inf
     record = MSEMetric('state mse', mask_pos)
@@ -378,7 +379,7 @@ def app1_trans_train(logger, env, agents, episode, action_interval, inference_ne
         logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
         best_att = app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
     avg_mse = record.get_result()
-    logger.info(f'approach 1: transfer dqn average travel time result: {best_att}')
+    logger.info(f'approach 1: transfer {agent_name} average travel time result: {best_att}')
     logger.info(f'final mse is: {avg_mse}')
     logger.info('-' * 50)
     return record
@@ -422,8 +423,8 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
     return best_att
 
 # I-I
-def app2_conc_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
-    logger.info(f"IDQN - IDQN control")
+def app2_conc_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate,agent_name):
+    logger.info(f"Independent {agent_name} control")
     logger.info(f"reward inference model: {reward_type}")
     if reward_type == 'SFM':
         reward_inference_net = SFM_predictor()
@@ -511,19 +512,20 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
         best_att = app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
     avg_mse = record.get_result()
     reward_avg_mse = record.get_result()
-    logger.info(f'approach 2: concurrent idqn average travel time result: {best_att}')
+    logger.info(f'approach 2: concurrent independent {agent_name} average travel time result: {best_att}')
     logger.info(f'final mse is: {avg_mse}')
     logger.info(f'final reward mse is: {reward_avg_mse}')
     logger.info('-' * 50)
     return record
 
-#IDQN-FRAP_DQN
-def app2_frap_train(logger, env, agents, episodes, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
+'''
+#FRAP_fixed_DQN
+def app2_frap_train(logger, env, agents, episodes, action_interval,save_rate):
     # take in environment and generate data for inference net
     # save t, phase_t, rewards_tp, state_tp, phase_tp(action_t) into dictionary
     # collect data for training state inference model GraphWaveNet (obs for train and miss for eval)
     state_raw_data = []
-    logger.info(f" IDQN -  FRAPDQN control")
+    logger.info(f" FRAPDQN-Fixed control")
     information = []
     total_decision_num = 0
     best_att = np.inf
@@ -641,6 +643,8 @@ def frap_execute(logger, env, agents, e, best_att, information, state_raw_data, 
     logger.info("episode:{}, Test:{}".format(e, att))
     return best_att
 
+'''
+
 #S-S-O
 def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
     if e % save_rate == save_rate - 1:
@@ -682,9 +686,9 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     return best_att
 
-def app2_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
+def app2_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate,agent_name):
     # this method is used in approach 1 ,transfer and approach 2, shared-parameter. 
-    logger.info(f"SDQN - SDQN - A control")
+    logger.info(f"SHARED {agent_name} - A control")
     logger.info(f"reward inference model: {reward_type}")
     if reward_type == 'SFM':
         reward_inference_net = SFM_predictor()
@@ -769,7 +773,7 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
         logger.info("episode:{}, Reward_MSETrain:{}".format(e, reward_cur_mse))
         best_att = app2_shared_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
     avg_mse = record.get_result()
-    logger.info(f'approach 2: shared dqn average travel time result: {best_att}')
+    logger.info(f'approach 2: shared {agent_name} average travel time result: {best_att}')
     logger.info(f'final mse is: {avg_mse}')
     logger.info('-' * 50)
     return record
@@ -813,7 +817,7 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     return best_att
 
-
+'''
 def app2_fsa_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate):
     # this method is used in approach 1 ,transfer and approach 2, shared-parameter.
     logger.info(f"FRAPS - A control")
@@ -905,3 +909,5 @@ def app2_fsa_train(logger, env, agents, episode, action_interval, state_inferenc
     logger.info(f'final mse is: {avg_mse}')
     logger.info('-' * 50)
     return record
+
+'''
