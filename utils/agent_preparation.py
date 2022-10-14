@@ -7,7 +7,7 @@ from agent.sdqn_agent import SDQNAgent, build_shared_model
 from agent.idqn_agent import IDQNAgent
 from agent.fixedtime_agent import FixedTimeAgent
 from agent.frap_agent import FRAP_DQNAgent
-from agent.frap_shared_agent import FRAP_SH_Agent
+from agent.frap_sh_agent import FRAP_SH_Agent,build_shared_2_model
 
 import gym
 import torch.optim as optim
@@ -34,12 +34,16 @@ def create_fixedtime_agents(world, time=30):
         ))
     return agents
 
-def create_preparation_agents(world, mask_pos,time):
+def create_preparation_agents(world, mask_pos,time,agent):
     agents = []
+    if (agent=='DQN'):
+        New_Agent=IDQNAgent
+    elif (agent=='FRAP'):
+        New_Agent=FRAP_DQNAgent
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
         if idx not in mask_pos:
-            agents.append(IDQNAgent(
+            agents.append(New_Agent(
                 action_space,
                 [
                     LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
@@ -75,6 +79,7 @@ def create_maxp_agents(world):
         ))
     return agents
 
+'''
 def create_frap_agents(world,mask_pos,time):
     agents = []
     for idx, i in enumerate(world.intersections):
@@ -100,13 +105,18 @@ def create_frap_agents(world,mask_pos,time):
                 i.id, idx,time=time
             ))
     return agents
+'''
 
-def create_app1maxp_agents(world, mask_pos):
+def create_app1maxp_agents(world, mask_pos,agent):
     agents = []
+    if (agent=='DQN'):
+        New_Agent=IDQNAgent
+    elif (agent=='FRAP'):
+        New_Agent=FRAP_DQNAgent
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
         if idx not in mask_pos:
-            agents.append(IDQNAgent(
+            agents.append(New_Agent(
                 action_space,
                 [
                     LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
@@ -127,11 +137,16 @@ def create_app1maxp_agents(world, mask_pos):
             ))
     return agents
     
-def create_idqn_agents(world):
+def create_independent_agents(world,agent):
     agents = []
+    New_Agent=None
+    if (agent=='DQN'):
+        New_Agent=IDQNAgent
+    elif (agent=='FRAP'):
+        New_Agent=FRAP_DQNAgent
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
-        agents.append(IDQNAgent(
+        agents.append(New_Agent(
             action_space,
             [
                 LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
@@ -142,8 +157,13 @@ def create_idqn_agents(world):
         ))
     return agents
 
-def create_sdqn_agents(world, mask_pos):
+def create_shared_agents(world, mask_pos,agent):
     agents = []
+    New_Agent = None
+    if (agent == 'DQN'):
+        New_Agent = IDQNAgent
+    elif (agent == 'FRAP'):
+        New_Agent = FRAP_SH_Agent
     obs_pos = list(set(range(len(world.intersections))) - set(mask_pos))
     iid = []
     ob_generator = []
@@ -158,12 +178,17 @@ def create_sdqn_agents(world, mask_pos):
         iid.append(inter.id)
     action_space = gym.spaces.Discrete(len(world.intersections[-1].phases))
     ob_length = ob_generator[0][0].ob_length + action_space.n
-    q_model = build_shared_model(ob_length, action_space)
-    target_q_model = build_shared_model(ob_length, action_space)
+    if agent=='DQN':
+        q_model = build_shared_model(ob_length, action_space)
+        target_q_model = build_shared_model(ob_length, action_space)
+    else:
+        q_model = build_shared_2_model(ob_length, action_space)
+        target_q_model = build_shared_2_model(ob_length, action_space)
     optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
-    agents.append(SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
+    agents.append(New_Agent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
     return agents
 
+'''
 def create_frap_s_agents(world,mask_pos):
     agents = []
     obs_pos = list(set(range(len(world.intersections))) - set(mask_pos))
@@ -180,8 +205,13 @@ def create_frap_s_agents(world,mask_pos):
             LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average=None, negative=True))
         iid.append(inter.id)
     action_space = gym.spaces.Discrete(len(world.intersections[-1].phases))
+    ob_length = ob_generator[0][0].ob_length + action_space.n
+    q_model = build_shared_2_model(ob_length, action_space)
+    target_q_model = build_shared_2_model(ob_length, action_space)
+    optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
     agents.append(
-        FRAP_SH_Agent(action_space, ob_generator, reward_generator, iid, obs_pos))
+        FRAP_SH_Agent(action_space, ob_generator, reward_generator, iid, obs_pos,q_model,target_q_model,optimizer))
     return agents
 
+'''
 
