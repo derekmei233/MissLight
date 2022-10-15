@@ -32,7 +32,7 @@ def create_fixedtime_agents(world, time=30):
         ))
     return agents
 
-def create_preparation_agents(world, mask_pos,time):
+def create_preparation_agents(world, mask_pos, time):
     agents = []
     for idx, i in enumerate(world.intersections):
         action_space = gym.spaces.Discrete(len(i.phases))
@@ -135,3 +135,26 @@ def create_sdqn_agents(world, mask_pos):
     optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
     agents.append(SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
     return agents
+
+def create_model_based_agents(world, mask_pos):
+    # this should be the same as approach 1.2 S-S-O control
+    agents = []
+    obs_pos = list(set(range(len(world.intersections))) - set(mask_pos))
+    iid = []
+    ob_generator = []
+    reward_generator = []
+    for idx, inter in enumerate(world.intersections):
+        ob_generator.append(
+            [
+                LaneVehicleGenerator(world, inter, ['lane_count'], in_only=True, average=None),
+                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False)
+            ])
+        reward_generator.append(LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average=None, negative=True))
+        iid.append(inter.id)
+    action_space = gym.spaces.Discrete(len(world.intersections[-1].phases))
+    ob_length = ob_generator[0][0].ob_length + action_space.n
+    q_model = build_shared_model(ob_length, action_space)
+    target_q_model = build_shared_model(ob_length, action_space)
+    optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
+    agents.append(SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
+    return agents 

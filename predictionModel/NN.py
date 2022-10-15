@@ -1,37 +1,54 @@
 import numpy as np
 import torch
-import pickle as pkl
-from torch import nn
+from torch import nn, no_grad
 import torch.nn.functional as F
 from  torch import optim
 from torch.utils.data import DataLoader, Dataset
 import os
 
+class NN_dataset(Dataset):
+    def __init__(self, feature, target):
+        self.len = len(feature)
+        self.features = torch.from_numpy(feature).float()
+        self.target = torch.from_numpy(target).float()
+
+    def __getitem__(self, idx):
+        return self.features[idx, :], self.target[idx]
+
+    def __len__(self):
+        return self.len
+
 
 class NN_predictor(object):
-    def __init__(self, in_dim, out_dim, DEVICE, model_dir):
+    def __init__(self, in_dim, out_dim, DEVICE, model_dir, reward_type):
         super(NN_predictor, self).__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.model =None
         self.make_model()
+        self.reward_type = reward_type
         self.criterion = nn.MSELoss()
         self.learning_rate = 0.001
         self.batch_size = 64
         self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate, momentum=0.9)
+        self.online_optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate * 0.1, momentum=0.9)
         self.DEVICE = DEVICE
-        self.model.double().to(DEVICE)
+        self.model.float().to(DEVICE)
         self.model_dir = model_dir
 
     def predict(self, x):
-        return self.model.forward(x)
-    
+        with no_grad():
+            result = self.model.forward(x)
+        return result
+
     def train(self, x_train, y_train, x_test, y_test, epochs):
         train_loss = 0.0
         test_loss = 0.0
         best_loss = np.inf
-        train_loader = DataLoader(infer_dataset(x_train, y_train), batch_size=64)
-        test_loader = DataLoader(infer_dataset(x_test, y_test), batch_size=64)
+        train_dataset = NN_dataset(x_train, y_train)
+        test_dataset = NN_dataset(x_test, y_test)
+        train_loader = DataLoader(train_dataset, batch_size=64)
+        test_loader = DataLoader(test_dataset, batch_size=64)
         for e in range(epochs):
             for i, data in enumerate(train_loader):
                 x, y_true = data
@@ -59,23 +76,35 @@ class NN_predictor(object):
             train_loss = 0.0
             test_loss = 0.0
         self.load_model()
-        self.model.double()
+        self.model.float()
         return self.model
+    
+    def train_while_control(self, x, target):
+        for idx in range(x.shape[0]):
+            x_train, y_true = x[idx,:], target[idx,:]
+            
+            self.online_optimizer.zero_grad()
+            x_train.to(self.DEVICE)
+            y_true.to(self.DEVICE)
+            y_pred = self.model(x_train)
+            loss = self.criterion(y_pred, y_true)
+            loss.backward()
+            self.optimizer.step()
 
     def make_model(self):
-        self.model = N_net(self.in_dim, self.out_dim).double()
+        self.model = N_net(self.in_dim, self.out_dim).float()
 
     def load_model(self):
-        name = "NN_inference.pt"
+        name = f"NN_inference_{self.reward_type}.pt"
         model_name = os.path.join(self.model_dir, name)
-        self.model = N_net(self.in_dim, self.out_dim).double()
+        self.model = N_net(self.in_dim, self.out_dim).float()
         self.model.load_state_dict(torch.load(model_name))
 
 
     def save_model(self):
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
-        name = "NN_inference.pt"
+        name = f"NN_inference_{self.reward_type}.pt"
         model_name = os.path.join(self.model_dir, name)
         torch.save(self.model.state_dict(), model_name)
 

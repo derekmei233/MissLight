@@ -2,10 +2,6 @@ import pickle
 import numpy as np 
 import json
 import sys
-import pandas as pd 
-import os
-import time
-from copy import deepcopy
 
 def generate_node_dict(roadnet_file):
     '''

@@ -63,13 +63,14 @@ def naive_train(logger, env, agents, episodes, action_interval, save_rate):
         last_observable = []
         observable = []
         rewards_observable = []
+        actions_observable = []
         i = 0
         while i < 3600:
             if i % action_interval == 0:
                 actions = []
                 for agent_id, agent in enumerate(agents):
                     if total_decision_num > agent.learning_start:
-                        actions.append(agent.choose(last_states, last_phases)) # okay, since idqn only applay to observable intersections
+                        actions.append(agent.choose(last_states, last_phases)) # okay, since idqn only apply to observable intersections
                     else:
                         actions.append(agent.sample())
                 rewards_list = []
@@ -91,6 +92,7 @@ def naive_train(logger, env, agents, episodes, action_interval, save_rate):
                         last_observable.append(last_obs[agent_id])
                         observable.append(obs[agent_id])
                         # S_{t+1}-> R_t
+                        actions_observable.append(actions[agent_id])
                         rewards_observable.append(rewards_train[agent_id])
                 total_decision_num += 1
                 last_obs = obs
@@ -103,7 +105,7 @@ def naive_train(logger, env, agents, episodes, action_interval, save_rate):
                     agent.replay()
                 if total_decision_num > agent.learning_start and total_decision_num % agent.update_target_model_freq == agent.update_target_model_freq - 1:
                     agent.update_target_network()
-        store_reshaped_data(information, [last_observable, rewards_observable, observable])
+        store_reshaped_data(information, [last_observable, rewards_observable, actions_observable, observable])
         state_raw_data.append(save_state)
         logger.info("episodes:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         best_att = naive_execute(logger, env, agents, e, best_att, information, state_raw_data, action_interval, save_rate)
@@ -130,6 +132,7 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
     last_observable = []
     observable = []
     rewards_observable = []
+    actions_observable = []
     while i < 3600:
         if i % action_interval == 0:
             actions = []
@@ -151,12 +154,13 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
                     last_observable.append(last_obs[agent_id])
                     observable.append(obs[agent_id])
                     # S_{t+1}-> R_t
+                    actions_observable.append(actions[agent_id])
                     rewards_observable.append(rewards_train[agent_id])
             last_obs = obs
             last_states, last_phases = list(zip(*last_obs))
             last_states = np.array(last_states, dtype=np.float32)
             last_phases = np.array(last_phases, dtype=np.int8)
-    store_reshaped_data(information, [last_observable, rewards_observable, observable])
+    store_reshaped_data(information, [last_observable, rewards_observable, actions_observable, observable])
     state_raw_data.append(save_state)
     att = env.eng.get_average_travel_time()
     if att < best_att:
@@ -564,7 +568,7 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
     if reward_type == 'SFM':
         reward_inference_net = SFM_predictor()
     elif reward_type == 'NN_st' or reward_type == 'NN_stp':
-        reward_inference_net = NN_predictor(agents[0].ob_length, 1, 'cpu', model_dir)
+        reward_inference_net = NN_predictor(agents[0].ob_length, 1, 'cpu', model_dir, reward_type)
         reward_inference_net.load_model()
     else:
         raise RuntimeError('not implemented yet')
@@ -687,3 +691,97 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     return best_att
+
+def model_based_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, save_rate, update_times=10):
+    # model based approach with sdqn 
+    logger.info(f"SDQN - SDQN -A control with model based learning")
+    logger.info(f"reward inference model: NN_st")
+
+    reward_inference_net = NN_predictor(agents[0].ob_length, 1, 'cpu', model_dir, reward_type)
+    # inference model is initailized with trained parameters
+    reward_inference_net.load_model()
+    total_decision_num = 0
+    best_att = np.inf
+    record = MSEMetric('state mse', mask_pos)
+    reward_record = MSEMetric('reward mse', mask_pos)
+    for e in range(episode):
+        last_obs = env.reset()
+        last_states, last_phases = list(zip(*last_obs))
+        last_states = np.array(last_states, dtype=np.float32)
+        last_phases = np.array(last_phases, dtype=np.int8)
+        # only recover state_t since we need this var to determine action t
+        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        record.add(last_states, last_recovered)
+        episodes_decision_num = 0
+        episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
+        i = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                for ag in agents:
+                    if total_decision_num > ag.learning_start:
+                        actions = ag.choose(last_recovered, last_phases, relation)
+                    else:
+                        actions = ag.sample()
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, dones, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards_train = np.mean(rewards_list, axis=0)
+                rewards = np.mean(rewards_train, axis=1)
+
+                rewards_recovered = rewards.copy()
+                for pos in mask_pos:
+                    if reward_type == 'NN_st':
+                        tmp = reward_inference_net.predict(torch.from_numpy(np.concatenate((last_recovered[pos], one_hot(last_phases[pos], agents[0].action_space.n)))).float())
+                        rewards_recovered[pos] = tmp
+                    elif reward_type == 'NN_sta':
+                        tmp = reward_inference_net.predict(torch.from_numpy(np.concatenate((last_recovered[pos], one_hot(actions[pos], agents[0].action_space.n)))).float())
+                        rewards_recovered[pos] = tmp                        
+                reward_record.add(rewards, rewards_recovered)
+
+                cur_states, cur_phases = list(zip(*obs))
+                cur_states = np.array(cur_states, dtype=np.float32)
+                cur_phases = np.array(cur_phases, dtype=np.int8)
+                cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                record.add(cur_states, cur_recovered)
+                for ag in agents:
+                    for idx in ag.idx:
+                        ag.remember(
+                            (last_recovered[idx], last_phases[idx]), actions[idx], rewards_recovered[idx], (cur_recovered[idx], cur_phases[idx]), idx)
+                        episodes_rewards[idx] += rewards[idx]
+                        episodes_decision_num += 1
+                total_decision_num += 1
+                last_obs = obs
+                last_states = cur_states
+                last_phases = cur_phases
+                last_recovered = cur_recovered
+            for ag in agents:
+                # only use experiences at observable intersections
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
+                    ag.replay()
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
+                    ag.update_target_network()
+            # transition model (reward model in our case) training starts here
+            x, target = agents[0].get_latest_sample()
+            reward_inference_net.train_while_control(x, target)
+            # TODO: try action later
+            for ag in agents:
+                # only use experiences at observable intersections
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
+                    ag.replay_img(reward_inference_net, update_times, reward_type)
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
+                    ag.update_target_network()
+        cur_mse = record.get_cur_result()
+        reward_cur_mse = reward_record.get_cur_result()
+        record.update()
+        reward_record.update()
+        logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
+        logger.info("episode:{}, Reward_MSETrain:{}".format(e, reward_cur_mse))
+        best_att = app2_shared_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
+    avg_mse = record.get_result()
+    logger.info(f'approach 2: shared dqn average travel time result: {best_att}')
+    logger.info(f'final mse is: {avg_mse}')
+    logger.info('-' * 50)
+    return record

@@ -135,7 +135,7 @@ class SDQNAgent(RLAgent):
     def replay(self):
         # sample from all buffers
 
-        minibatch = self._sample()
+        minibatch = self._sample(self.batch_size)
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         out = self.target_model.forward(next_obs, train=False)
         target = rewards + self.gamma * torch.max(out, dim=1)[0]
@@ -148,11 +148,46 @@ class SDQNAgent(RLAgent):
         self.optimizer.step()
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
-    
-    def _sample(self):
+
+    def replay_img(self, reward_model, update_times, infer='NN_st'):
+        minibatch = self._sample(update_times)
+        obs, actions, rewards, next_obs = self._encode_sample(minibatch)
+        if infer == 'NN_st':
+            x = obs
+        elif infer == 'NN_sta':
+            obses_t, actions_t, _, _ = list(zip(*minibatch))
+            tmp = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
+            obs_oh = one_hot(actions_t, self.action_space.n)
+            x = torch.from_numpy(np.concatenate((tmp[0], obs_oh), axis=1)).float()
+        rewards = torch.squeeze(reward_model.predict(x), dim=1)
+        out = self.target_model.forward(next_obs, train=False)
+        target = rewards + self.gamma * torch.max(out, dim=1)[0]
+        target_f = self.model.forward(obs, train=False)
+        for i, action in enumerate(actions):
+            target_f[i][action] = target[i]
+        loss = self.criterion(self.model.forward(obs, train=True), target_f)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()        
+
+    def get_latest_sample(self, infer='NN_st'):
+        sample = []
+        for idx,i in enumerate(self.idx):
+            sample.append(self.memory[idx][-1])
+        obs, actions, rewards, _ = list(zip(*sample))
+        states, phases = [np.stack(ob) for ob in list(zip(*obs))]
+        if infer == 'NN_st':
+            obs2 = one_hot(phases, self.action_space.n)
+        elif infer == 'NN_sta':
+            obs2 = one_hot(actions, self.action_space.n)
+        x = torch.from_numpy(np.concatenate((states, obs2), axis=1)).float()
+        target = torch.from_numpy(np.array(rewards)[:, np.newaxis]).float()
+        return x, target
+
+    def _sample(self, batch_size):
         mini_batch = []
         for i in range(self.learnable):
-            mini_batch.extend(random.sample(self.memory[i], self.batch_size))
+            mini_batch.extend(random.sample(self.memory[i], batch_size))
         random.shuffle(mini_batch)
         return mini_batch
 
@@ -200,4 +235,3 @@ if __name__ == '__main__':
     agents.append(SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
     env = TSCEnv(world, agents, None)
     print('construction finished')
-    
