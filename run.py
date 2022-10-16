@@ -24,10 +24,10 @@ EPOCHS = 50
 IN_DIM = {'NN_st': 20, 'NN_stp': 12, 'NN_sta': 20}
 if torch.has_cuda:
     DEVICE = torch.device('cuda')
-elif torch.has_mps:
+#elif torch.has_mps:
     # TODO: fix placeholder problem later
 
-    DEVICE = torch.device('cpu')
+    #DEVICE = torch.device('cpu')
 else:
     DEVICE = torch.device('cpu')
 
@@ -38,15 +38,15 @@ parser.add_argument('--config', type=str, default='hz4x4', help='network working
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=20, help='training episodes')
+parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
 parser.add_argument('-impute', default='sfm')
-parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'])
-parser.add_argument('-control', default='I-I', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'S-S-O-model_based'])
-parser.add_argument('--prefix', default='working', type=str)
+parser.add_argument('-agent', default='FRAP',choices=['DQN','FRAP'])
+parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'S-S-O-model_based'])
+parser.add_argument('--prefix', default='working_pos(6)', type=str)
 
 parser.add_argument('--debug', action='store_true')
-parser.add_argument('--mask_pos', default='4,7,12', type=str)
+parser.add_argument('--mask_pos', default='6', type=str)
 
 
 if __name__ == "__main__":
@@ -186,9 +186,9 @@ if __name__ == "__main__":
         app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
 
     elif args.control == 'S-S-O-model_based':
-        agents = create_model_based_agents(world, mask_pos, device=DEVICE)
+        agents = create_model_based_agents(world, mask_pos, device=DEVICE,agent=args.agent)
         env = create_env(world, agents)
         state_inference_net = SFM_predictor()
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        model_based_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir,  reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE, update_times=30)
+        model_based_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir,  reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, update_times=30)
