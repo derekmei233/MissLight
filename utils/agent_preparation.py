@@ -188,9 +188,14 @@ def create_shared_agents(world, mask_pos,agent, device):
     agents.append(New_Agent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer, device))
     return agents
 
-def create_model_based_agents(world, mask_pos, device):
+def create_model_based_agents(world, mask_pos, device,agent):
     # this should be the same as approach 1.2 S-S-O control
     agents = []
+    New_Agent = None
+    if (agent == 'DQN'):
+        New_Agent = SDQNAgent
+    elif (agent == 'FRAP'):
+        New_Agent = FRAP_SH_Agent
     obs_pos = list(set(range(len(world.intersections))) - set(mask_pos))
     iid = []
     ob_generator = []
@@ -205,8 +210,12 @@ def create_model_based_agents(world, mask_pos, device):
         iid.append(inter.id)
     action_space = gym.spaces.Discrete(len(world.intersections[-1].phases))
     ob_length = ob_generator[0][0].ob_length + action_space.n
-    q_model = build_shared_model(ob_length, action_space)
-    target_q_model = build_shared_model(ob_length, action_space)
+    if agent=='DQN':
+        q_model = build_shared_model(ob_length, action_space)
+        target_q_model = build_shared_model(ob_length, action_space)
+    else:
+        q_model = build_shared_2_model(ob_length, action_space)
+        target_q_model = build_shared_2_model(ob_length, action_space)
     optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
-    agents.append(SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer, device))
+    agents.append(New_Agent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer, device))
     return agents 
