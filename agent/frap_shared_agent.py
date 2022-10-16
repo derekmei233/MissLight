@@ -247,8 +247,8 @@ class FRAP_SH_Agent(RLAgent):
         # get all observation now
         actions = []
         for idx in range(self.sub_agents):
-            ob_oh = one_hot(phase[idx], self.action_space.n)
-            obs = torch.tensor(np.concatenate((ob[idx:idx+1,:], ob_oh),axis=1)).float().to(self.device)
+            ob_oh =phase[idx:idx+1,:]
+            obs = torch.tensor(np.concatenate((ob_oh,ob[idx:idx+1,:]),axis=1)).float().to(self.device)
             act_values = self.model.forward(obs, train=False)
             actions.append(torch.argmax(act_values))
         return actions
