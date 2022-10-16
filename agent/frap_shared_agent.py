@@ -25,8 +25,29 @@ def one_hot(phase, num_class):
     # one_hot = one_hot.reshape(*phase.shape, num_class)
     return one_hot
 
-def build_shared_2_model():
-    return None
+phase_pairs=[[4, 10], [1, 7], [3, 9], [0, 6], [9, 10], [3, 4], [6, 7], [0, 1]]
+
+
+def relation():
+    comp_mask = []
+    for i in range(len(phase_pairs)):
+        zeros = np.zeros(len(phase_pairs) - 1, dtype=np.int)
+        cnt = 0
+        for j in range(len(phase_pairs)):
+            if i == j: continue
+            pair_a = phase_pairs[i]
+            pair_b = phase_pairs[j]
+            if len(list(set(pair_a + pair_b))) == 3: zeros[cnt] = 1
+            cnt += 1
+        comp_mask.append(zeros)
+    comp_mask = torch.from_numpy(np.asarray(comp_mask))
+    return comp_mask
+
+comp_mask=relation()
+
+def build_shared_2_model(ob_length,action_space):
+    model=FRAP(ob_length,action_space.n,phase_pairs,comp_mask)
+    return model
 
 class FRAP(nn.Module):
     def __init__(self, size_in,output_shape, phase_pairs,
@@ -165,7 +186,7 @@ class FRAP_SH_Agent(RLAgent):
         all or observable intersections, we use it to process all information but only give it accessibility to observable ones
     """
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, device):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx,q_model,target_q_model,optimizer,device):
         super().__init__(action_space, ob_generator, reward_generator)
         self.iid = iid
         self.idx = idx  # learnable index
@@ -192,13 +213,15 @@ class FRAP_SH_Agent(RLAgent):
         self.epsilon_decay = 0.995
         self.learning_rate = 0.0001
         self.batch_size = 64
+        self.device=device
 
         self.criterion = nn.MSELoss(reduction='mean')
-        self.model = self.build_shared_model()
-        self.target_model = self.build_shared_model()
+        self.model = q_model #self.build_shared_model()
+
+        self.target_model =  target_q_model #self.build_shared_model()
         #self.optimizer = optimizer
-        self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False,
-                                       eps=1e-7)
+        self.optimizer = optimizer #optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False,
+                                       #eps=1e-7)
 
     def relation(self):
         comp_mask = []
@@ -225,7 +248,7 @@ class FRAP_SH_Agent(RLAgent):
         actions = []
         for idx in range(self.sub_agents):
             ob_oh = one_hot(phase[idx], self.action_space.n)
-            obs = torch.tensor(np.concatenate((ob[idx:idx+1,:], ob_oh),axis=1)).float()
+            obs = torch.tensor(np.concatenate((ob[idx:idx+1,:], ob_oh),axis=1)).float().to(self.device)
             act_values = self.model.forward(obs, train=False)
             actions.append(torch.argmax(act_values))
         return actions
@@ -263,16 +286,22 @@ class FRAP_SH_Agent(RLAgent):
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
         # expand action to one_hot
-        obs_oh = one_hot(obs[1], self.action_space.n)
-        obs = np.concatenate((obs[0], obs_oh), axis=1)
+        obs_oh = np.zeros((64, 1))
+        for i in range(64):
+            obs_oh[i] = obs[1][i]
+        obs = np.concatenate((obs_oh, obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = one_hot(next_obs[1], self.action_space.n)
-        next_obs = np.concatenate((next_obs[0], next_obs_oh), axis=1)
+        next_obs_oh = np.zeros((64, 1))
+        for i in range(64):
+            next_obs_oh[i] = next_obs[1][i]
+        # next_obs_oh[0]=next_obs[1].squeeze()
+        # next_obs_oh = one_hot(next_obs[1], self.action_space.n)
+        next_obs = np.concatenate((next_obs_oh, next_obs[0]), axis=1)
         rewards = np.array(rewards_t, copy=False)
-        obs = torch.from_numpy(obs).float()
-        rewards = torch.from_numpy(rewards).float()
-        next_obs = torch.from_numpy(next_obs).float()
+        obs = torch.from_numpy(obs).float().to(self.device)
+        rewards = torch.from_numpy(rewards).float().to(self.device)
+        next_obs = torch.from_numpy(next_obs).float().to(self.device)
         return obs, actions_t, rewards, next_obs
 
     def replay(self):
