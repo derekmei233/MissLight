@@ -25,7 +25,7 @@ def one_hot(phase, num_class):
 
 #@Registry.register_model('frap')
 class FRAP_DQNAgent(RLAgent):
-    def __init__(self, action_space, ob_generator,reward_generator, iid, idx):
+    def __init__(self, action_space, ob_generator,reward_generator, iid, idx,device):
         super(FRAP_DQNAgent,self).__init__(action_space, ob_generator,reward_generator)
         #self.dic_agent_conf = Registry.mapping['model_mapping']['model_setting']
         #self.dic_traffic_env_conf = Registry.mapping['world_mapping']['traffic_setting']
@@ -42,6 +42,7 @@ class FRAP_DQNAgent(RLAgent):
         self.batch_size = 64
         self.buffer_size = 10000
         self.memory = deque(maxlen=self.buffer_size)
+        self.device=device
 
         self.sub_agents = 1
 
@@ -110,6 +111,7 @@ class FRAP_DQNAgent(RLAgent):
 
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
+        #return [np.array(self.ob_generator[1].generate()),self.ob_generator[0].generate()]
 
     def get_reward(self):
         reward = self.reward_generator.generate()
@@ -130,10 +132,11 @@ class FRAP_DQNAgent(RLAgent):
         phase:(1,)
         """
         #print(len(phase))
-        ob_oh = one_hot(phase[self.idx], self.action_space.n)
-        #print(ob_oh)
+        #ob_oh = one_hot(phase[self.idx], self.action_space.n)
+        ob_oh=phase[self.idx:self.idx+1,:]
+        #print(len(ob_oh[0]))
         #print(ob[self.idx:self.idx+1,:])
-        obs = torch.tensor(np.concatenate((ob[self.idx:self.idx+1,:], ob_oh),axis=1)).float()
+        obs = torch.tensor(np.concatenate((ob_oh,ob[self.idx:self.idx+1,:]),axis=1)).float()
         #print(obs)
         act_values = self.model.forward(obs, train=False)
         #actions = self.model(observation, train=True)  # 1, 8
@@ -162,16 +165,25 @@ class FRAP_DQNAgent(RLAgent):
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
         # expand action to one_hot
-        obs_oh = one_hot(obs[1], self.action_space.n)
-        obs = np.concatenate((obs[0], obs_oh), axis=1)
+        #obs_oh = one_hot(obs[1], self.action_space.n)
+        #obs_oh= []
+        #print(obs)
+        obs_oh=np.zeros((64,1))
+        for i in range(64):
+            obs_oh[i] = obs[1][i]
+        obs = np.concatenate((obs_oh,obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = one_hot(next_obs[1], self.action_space.n)
-        next_obs = np.concatenate((next_obs[0], next_obs_oh), axis=1)
+        next_obs_oh = np.zeros((64, 1))
+        for i in range(64):
+            next_obs_oh[i] = next_obs[1][i]
+        #next_obs_oh[0]=next_obs[1].squeeze()
+        #next_obs_oh = one_hot(next_obs[1], self.action_space.n)
+        next_obs = np.concatenate((next_obs_oh,next_obs[0]), axis=1)
         rewards = np.array(rewards_t, copy=False)
-        obs = torch.from_numpy(obs).float()
-        rewards = torch.from_numpy(rewards).float()
-        next_obs = torch.from_numpy(next_obs).float()
+        obs = torch.from_numpy(obs).float().to(self.device)
+        rewards = torch.from_numpy(rewards).float().to(self.device)
+        next_obs = torch.from_numpy(next_obs).float().to(self.device)
         return obs, actions_t, rewards, next_obs
 
     def replay(self):
@@ -236,7 +248,7 @@ class FRAP(nn.Module):
 
         self.lane_embedding = nn.Linear(self.p_out + self.d_out, self.lane_embed_units)
 
-        self.lane_conv = nn.Conv2d(2 * self.lane_embed_units, 20, kernel_size=(1, 1))
+        self.lane_conv = nn.Conv2d(2*self.lane_embed_units, 20, kernel_size=(1, 1))
 
         self.relation_embedding = nn.Embedding(2, relation_embed_size)
         self.relation_conv = nn.Conv2d(relation_embed_size, 20, kernel_size=(1, 1))
@@ -266,6 +278,7 @@ class FRAP(nn.Module):
         if not self.one_hot:
             for i in range(batch_size):
                 act_idx = acts[i]
+                #print(act_idx)
                 pair = self.phase_pairs[act_idx]
                 zeros = torch.zeros(num_movements, dtype=torch.int64)
                 zeros[pair[0]] = 1
@@ -274,8 +287,9 @@ class FRAP(nn.Module):
             extended_acts = torch.stack(extended_acts)
         else:
             extended_acts = acts
+        #print(acts)
         phase_embeds = torch.sigmoid(self.p(extended_acts))
-
+        #print(phase_embeds.size())
         phase_demands = []
         # if num_movements == 12:
         #     order_lane = [0,1,3,4,6,7,9,10] # remove turning_right phase
@@ -291,6 +305,7 @@ class FRAP(nn.Module):
             phase_demand_embed = F.relu(self.lane_embedding(phase_demand))
             phase_demands.append(phase_demand_embed)
         phase_demands = torch.stack(phase_demands, 1)
+        #print(phase_demands.size())
         # phase_demands_old = torch.stack(phase_demands, 1)
         # # turn direction from NESW to ESWN
         # if num_movements == 8:
@@ -301,7 +316,7 @@ class FRAP(nn.Module):
 
         pairs = []
         for pair in self.phase_pairs:
-            pairs.append(phase_demands[:, pair[0]] + phase_demands[:, pair[1]])
+            pairs.append(phase_demands[:,pair[0]] + phase_demands[:,pair[1]])
 
         rotated_phases = []
         for i in range(len(pairs)):
@@ -309,7 +324,7 @@ class FRAP(nn.Module):
                 if i != j: rotated_phases.append(torch.cat((pairs[i], pairs[j]), -1))
         rotated_phases = torch.stack(rotated_phases, 1)
         rotated_phases = torch.reshape(rotated_phases,
-                                       (batch_size, self.oshape, self.oshape - 1, 2 * self.lane_embed_units))
+                                       (batch_size, self.oshape, self.oshape - 1,  2*self.lane_embed_units))
         rotated_phases = rotated_phases.permute(0, 3, 1, 2)  # Move channels up
         rotated_phases = F.relu(self.lane_conv(rotated_phases))  # Conv-20x1x1  pair demand representation
 
