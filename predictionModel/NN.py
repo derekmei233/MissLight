@@ -26,14 +26,14 @@ class NN_predictor(object):
         self.out_dim = out_dim
         self.model =None
         self.make_model()
+        self.DEVICE = DEVICE
+        self.model.to(DEVICE).float()
         self.reward_type = reward_type
         self.criterion = nn.MSELoss()
         self.learning_rate = 0.001
         self.batch_size = 64
         self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate, momentum=0.9)
         self.online_optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate * 0.1, momentum=0.9)
-        self.DEVICE = DEVICE
-        self.model.float().to(DEVICE)
         self.model_dir = model_dir
 
     def predict(self, x):
@@ -75,8 +75,7 @@ class NN_predictor(object):
             print(f'epoch{e}: test average loss {test_loss / i}.')
             train_loss = 0.0
             test_loss = 0.0
-        self.load_model()
-        self.model.float()
+        self.model = self.model.float()
         return self.model
     
     def train_while_control(self, x, target):
@@ -97,8 +96,9 @@ class NN_predictor(object):
     def load_model(self):
         name = f"NN_inference_{self.reward_type}.pt"
         model_name = os.path.join(self.model_dir, name)
-        self.model = N_net(self.in_dim, self.out_dim).float()
+        self.model = N_net(self.in_dim, self.out_dim)
         self.model.load_state_dict(torch.load(model_name))
+        self.model = self.model.float()
 
 
     def save_model(self):

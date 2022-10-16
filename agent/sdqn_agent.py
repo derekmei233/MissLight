@@ -49,11 +49,12 @@ class SDQNAgent(RLAgent):
         all or observable intersections, we use it to process all information but only give it accessibility to observable ones
     """
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, q_model, target_q_model, optimizer):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, q_model, target_q_model, optimizer, device):
         super().__init__(action_space, ob_generator, reward_generator)
         self.iid = iid
         self.idx = idx # learnable index
         self.sub_agents = len(iid)
+        self.device = device
 
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0][0].ob_length, self.action_space.n]
@@ -87,7 +88,7 @@ class SDQNAgent(RLAgent):
         actions = []
         for idx in range(self.sub_agents):
             ob_oh = one_hot(phase[idx], self.action_space.n)
-            obs = torch.tensor(np.concatenate((ob[idx], ob_oh))).float()
+            obs = torch.tensor(np.concatenate((ob[idx], ob_oh))).float().to(self.device)
             act_values = self.model.forward(obs, train=False)
             actions.append(torch.argmax(act_values))
         return actions
@@ -127,9 +128,9 @@ class SDQNAgent(RLAgent):
         next_obs_oh = one_hot(next_obs[1], self.action_space.n)
         next_obs = np.concatenate((next_obs[0], next_obs_oh), axis=1)
         rewards = np.array(rewards_t, copy=False)
-        obs = torch.from_numpy(obs).float()
-        rewards = torch.from_numpy(rewards).float()
-        next_obs = torch.from_numpy(next_obs).float()
+        obs = torch.from_numpy(obs).float().to(self.device)
+        rewards = torch.from_numpy(rewards).float().to(self.device)
+        next_obs = torch.from_numpy(next_obs).float().to(self.device)
         return obs, actions_t, rewards, next_obs
 
     def replay(self):
@@ -150,6 +151,8 @@ class SDQNAgent(RLAgent):
             self.epsilon *= self.epsilon_decay
 
     def replay_img(self, reward_model, update_times, infer='NN_st'):
+        if update_times == 0:
+            return 
         minibatch = self._sample(update_times)
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         if infer == 'NN_st':
@@ -158,7 +161,7 @@ class SDQNAgent(RLAgent):
             obses_t, actions_t, _, _ = list(zip(*minibatch))
             tmp = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
             obs_oh = one_hot(actions_t, self.action_space.n)
-            x = torch.from_numpy(np.concatenate((tmp[0], obs_oh), axis=1)).float()
+            x = torch.from_numpy(np.concatenate((tmp[0], obs_oh), axis=1)).float().to(self.device)
         rewards = torch.squeeze(reward_model.predict(x), dim=1)
         out = self.target_model.forward(next_obs, train=False)
         target = rewards + self.gamma * torch.max(out, dim=1)[0]
@@ -180,8 +183,8 @@ class SDQNAgent(RLAgent):
             obs2 = one_hot(phases, self.action_space.n)
         elif infer == 'NN_sta':
             obs2 = one_hot(actions, self.action_space.n)
-        x = torch.from_numpy(np.concatenate((states, obs2), axis=1)).float()
-        target = torch.from_numpy(np.array(rewards)[:, np.newaxis]).float()
+        x = torch.from_numpy(np.concatenate((states, obs2), axis=1)).float().to(self.device)
+        target = torch.from_numpy(np.array(rewards)[:, np.newaxis]).float().to(self.device)
         return x, target
 
     def _sample(self, batch_size):

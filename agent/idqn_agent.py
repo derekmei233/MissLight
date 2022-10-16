@@ -32,13 +32,14 @@ class IDQN(nn.Module):
                 return self._forward(x)
 
 class IDQNAgent(RLAgent):
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, device='cpu'):
         super().__init__(action_space, ob_generator, reward_generator)
         
         self.iid = iid
         self.sub_agents = 1
         self.idx = idx
         self.name = self.__class__.__name__
+        self.device = device
 
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
@@ -69,7 +70,7 @@ class IDQNAgent(RLAgent):
     def get_action(self, ob, phase, relation=None):
         # get all observation now
         ob_oh = one_hot(phase[self.idx], self.action_space.n)
-        obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float()
+        obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float().to(self.device)
         act_values = self.model.forward(obs, train=False)
         return torch.argmax(act_values)
 
@@ -106,9 +107,9 @@ class IDQNAgent(RLAgent):
         next_obs_oh = one_hot(next_obs[1], self.action_space.n)
         next_obs = np.concatenate((next_obs[0], next_obs_oh), axis=1)
         rewards = np.array(rewards_t, copy=False)
-        obs = torch.from_numpy(obs).float()
-        rewards = torch.from_numpy(rewards).float()
-        next_obs = torch.from_numpy(next_obs).float()
+        obs = torch.from_numpy(obs).float().to(self.device)
+        rewards = torch.from_numpy(rewards).float().to(self.device)
+        next_obs = torch.from_numpy(next_obs).float().to(self.device)
         return obs, actions_t, rewards, next_obs
 
     def replay(self):
