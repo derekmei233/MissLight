@@ -55,8 +55,11 @@ def naive_train(logger, env, agents, episodes, action_interval, save_rate, agent
         # collect [state_t, phase_t, reward_t, state_tp, phase_tp(action_t)] pair at observable intersections
         save_state = []
         last_obs = env.reset()
+        #print(last_obs)
         save_state.append(last_obs)
-        last_states, last_phases = list(zip(*last_obs))
+        last_states,last_phases = list(zip(*last_obs))
+        #print(last_phases)
+        #print(last_states)
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         episodes_rewards = [0 for _ in agents]
@@ -834,9 +837,9 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     return best_att
 
-def model_based_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, device, save_rate, update_times=10):
+def model_based_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, device, save_rate, agent_name,update_times=10):
     # model based approach with sdqn 
-    logger.info(f"SDQN - SDQN -A control with model based learning")
+    logger.info(f"SHARED {agent_name} -A control with model based learning")
     logger.info(f"reward inference model: NN_st")
 
     reward_inference_net = NN_predictor(agents[0].ob_length, 1, device, model_dir, reward_type)
@@ -923,7 +926,7 @@ def model_based_shared_train(logger, env, agents, episode, action_interval, stat
         logger.info("episode:{}, Reward_MSETrain:{}".format(e, reward_cur_mse))
         best_att = app2_shared_execute(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
     avg_mse = record.get_result()
-    logger.info(f'approach 2: shared dqn average travel time result: {best_att}')
+    logger.info(f'approach 2: shared {agent_name} average travel time result: {best_att}')
     logger.info(f'final mse is: {avg_mse}')
     logger.info('-' * 50)
     return record
