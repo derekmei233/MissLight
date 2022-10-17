@@ -168,14 +168,14 @@ class FRAP_DQNAgent(RLAgent):
         #obs_oh = one_hot(obs[1], self.action_space.n)
         #obs_oh= []
         #print(obs)
-        obs_oh=np.zeros((64,1))
-        for i in range(64):
+        obs_oh=np.zeros((self.batch_size,1))
+        for i in range(self.batch_size):
             obs_oh[i] = obs[1][i]
         obs = np.concatenate((obs_oh,obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = np.zeros((64, 1))
-        for i in range(64):
+        next_obs_oh = np.zeros((self.batch_size, 1))
+        for i in range(self.batch_size):
             next_obs_oh[i] = next_obs[1][i]
         #next_obs_oh[0]=next_obs[1].squeeze()
         #next_obs_oh = one_hot(next_obs[1], self.action_space.n)
