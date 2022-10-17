@@ -281,19 +281,19 @@ class FRAP_SH_Agent(RLAgent):
     def remember(self, ob, action, reward, next_ob, idx):
         self.memory[self.idx.index(idx)].append((ob, action, reward, next_ob))
 
-    def _encode_sample(self, minibatch):
+    def _encode_sample(self, minibatch,batch_size):
         # TODO: check dimension
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
         # expand action to one_hot
-        obs_oh = np.zeros((self.batch_size*self.learnable, 1))
-        for i in range(self.batch_size*self.learnable):
+        obs_oh = np.zeros((batch_size*self.learnable, 1))
+        for i in range(batch_size*self.learnable):
             obs_oh[i] = obs[1][i]
         obs = np.concatenate((obs_oh, obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = np.zeros((self.batch_size*self.learnable, 1))
-        for i in range(self.batch_size*self.learnable):
+        next_obs_oh = np.zeros((batch_size*self.learnable, 1))
+        for i in range(batch_size*self.learnable):
             next_obs_oh[i] = next_obs[1][i]
         # next_obs_oh[0]=next_obs[1].squeeze()
         # next_obs_oh = one_hot(next_obs[1], self.action_space.n)
@@ -308,7 +308,7 @@ class FRAP_SH_Agent(RLAgent):
         # sample from all buffers
 
         minibatch = self._sample(self.batch_size)
-        obs, actions, rewards, next_obs = self._encode_sample(minibatch)
+        obs, actions, rewards, next_obs = self._encode_sample(minibatch,self.batch_size)
         out = self.target_model.forward(next_obs, train=False)
         target = rewards + self.gamma * torch.max(out, dim=1)[0]
         target_f = self.model.forward(obs, train=False)
@@ -346,7 +346,7 @@ class FRAP_SH_Agent(RLAgent):
         if update_times == 0:
             return
         minibatch = self._sample(update_times)
-        obs, actions, rewards, next_obs = self._encode_sample(minibatch)
+        obs, actions, rewards, next_obs = self._encode_sample(minibatch,update_times)
         if infer == 'NN_st':
             x = obs
         elif infer == 'NN_sta':
