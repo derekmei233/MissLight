@@ -286,14 +286,14 @@ class FRAP_SH_Agent(RLAgent):
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
         # expand action to one_hot
-        obs_oh = np.zeros((64, 1))
-        for i in range(64):
+        obs_oh = np.zeros((self.batch_size*self.sub_agents, 1))
+        for i in range(self.batch_size*self.sub_agents):
             obs_oh[i] = obs[1][i]
         obs = np.concatenate((obs_oh, obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = np.zeros((64, 1))
-        for i in range(64):
+        next_obs_oh = np.zeros((self.batch_size*self.sub_agents, 1))
+        for i in range(self.batch_size*self.sub_agents):
             next_obs_oh[i] = next_obs[1][i]
         # next_obs_oh[0]=next_obs[1].squeeze()
         # next_obs_oh = one_hot(next_obs[1], self.action_space.n)
@@ -307,7 +307,7 @@ class FRAP_SH_Agent(RLAgent):
     def replay(self):
         # sample from all buffers
 
-        minibatch = self._sample()
+        minibatch = self._sample(self.batch_size)
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         out = self.target_model.forward(next_obs, train=False)
         target = rewards + self.gamma * torch.max(out, dim=1)[0]
@@ -321,7 +321,7 @@ class FRAP_SH_Agent(RLAgent):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def _sample(self):
+    def _sample(self,batch_size):
         mini_batch = []
         for i in range(self.learnable):
             mini_batch.extend(random.sample(self.memory[i], self.batch_size))
@@ -341,6 +341,29 @@ class FRAP_SH_Agent(RLAgent):
         x = torch.from_numpy(np.concatenate((obs2,states), axis=1)).float().to(self.device)
         target = torch.from_numpy(np.array(rewards)[:, np.newaxis]).float().to(self.device)
         return x, target
+    
+    def replay_img(self, reward_model, update_times, infer='NN_st'):
+        if update_times == 0:
+            return
+        minibatch = self._sample(update_times)
+        obs, actions, rewards, next_obs = self._encode_sample(minibatch)
+        if infer == 'NN_st':
+            x = obs
+        elif infer == 'NN_sta':
+            obses_t, actions_t, _, _ = list(zip(*minibatch))
+            tmp = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
+            obs_oh = one_hot(actions_t, self.action_space.n)
+            x = torch.from_numpy(np.concatenate((tmp[0], obs_oh), axis=1)).float().to(self.device)
+        rewards = torch.squeeze(reward_model.predict(x), dim=1)
+        out = self.target_model.forward(next_obs, train=False)
+        target = rewards + self.gamma * torch.max(out, dim=1)[0]
+        target_f = self.model.forward(obs, train=False)
+        for i, action in enumerate(actions):
+            target_f[i][action] = target[i]
+        loss = self.criterion(self.model.forward(obs, train=True), target_f)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
     def load_model(self, model_dir):
         # only load for idx == min(self.all_id)
