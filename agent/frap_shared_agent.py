@@ -348,7 +348,9 @@ class FRAP_SH_Agent(RLAgent):
         minibatch = self._sample(update_times)
         obs, actions, rewards, next_obs = self._encode_sample(minibatch,update_times)
         if infer == 'NN_st':
-            x = obs
+            obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obs))]
+            obs_oh=one_hot(obs[1],self.action_space.n)
+            x = torch.from_numpy(np.concatenate((obs[0], obs_oh), axis=1)).float().to(self.device)
         elif infer == 'NN_sta':
             obses_t, actions_t, _, _ = list(zip(*minibatch))
             tmp = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
