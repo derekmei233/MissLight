@@ -327,6 +327,20 @@ class FRAP_SH_Agent(RLAgent):
             mini_batch.extend(random.sample(self.memory[i], self.batch_size))
         random.shuffle(mini_batch)
         return mini_batch
+    
+    def get_latest_sample(self, infer='NN_st'):
+        sample = []
+        for idx,i in enumerate(self.idx):
+            sample.append(self.memory[idx][-1])
+        obs, actions, rewards, _ = list(zip(*sample))
+        states, phases = [np.stack(ob) for ob in list(zip(*obs))]
+        if infer == 'NN_st':
+            obs2 = one_hot(phases, self.action_space.n)
+        elif infer == 'NN_sta':
+            obs2 = one_hot(actions, self.action_space.n)
+        x = torch.from_numpy(np.concatenate((obs2,states), axis=1)).float().to(self.device)
+        target = torch.from_numpy(np.array(rewards)[:, np.newaxis]).float().to(self.device)
+        return x, target
 
     def load_model(self, model_dir):
         # only load for idx == min(self.all_id)
