@@ -324,7 +324,7 @@ class FRAP_SH_Agent(RLAgent):
     def _sample(self,batch_size):
         mini_batch = []
         for i in range(self.learnable):
-            mini_batch.extend(random.sample(self.memory[i], self.batch_size))
+            mini_batch.extend(random.sample(self.memory[i], batch_size))
         random.shuffle(mini_batch)
         return mini_batch
     
