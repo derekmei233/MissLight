@@ -348,6 +348,9 @@ class FRAP_SH_Agent(RLAgent):
         minibatch = self._sample(update_times)
         obs, actions, rewards, next_obs = self._encode_sample(minibatch,update_times)
         if infer == 'NN_st':
+            '''
+            tensor->one_hot
+            '''
             tmp=obs[:,:1].cpu().detach().numpy().astype(np.int8)
             states=obs[:,1:].cpu().detach().numpy()
             ones=np.zeros((tmp.size,self.action_space.n)).astype(np.int8)
