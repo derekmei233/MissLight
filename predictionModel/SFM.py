@@ -1,13 +1,34 @@
-from utils.preparation import get_road_adj, inter2edge_slice, mask_op, get_mask_matrix, reconstruct_data_slice
-
+from utils.preparation import inter2edge_slice, mask_op, mask_with_truth, reconstruct_data_slice
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
 
 # sfm_prediction only needs one time slice, redesign mask_op and construct_data
-def mask_op_slice():
-    pass
+class SFM_dataset(Dataset):
+    def __init__(self, feature, target):
+        self.len = len(feature)
+        self.features = feature
+        self.target = target
+
+    def __getitem__(self, idx):
+        return self.features[idx, :], self.target[idx]
+
+    def __len__(self):
+        return self.len
+
+def masked_mae(preds, labels, mask):
+    loss = np.abs(preds-labels)
+    loss = loss * mask
+    return np.mean(loss)
 
 class SFM_predictor(object):
-    def __init__(self):
+    def __init__(self, mask_matrix, adj_matrix, pattern):
         super(SFM_predictor, self).__init__()
+        self.mask_matrix = mask_matrix
+        self.mask = np.where(mask_matrix == 1,1,0)[:, np.newaxis].repeat(3, axis=1).T[np.newaxis,:,:,np.newaxis]
+        self.eval_mask = np.where(mask_matrix == 2,1,0)[:, np.newaxis].repeat(3, axis=1).T[np.newaxis,:,:,np.newaxis]
+        self.adj_matrix = adj_matrix
+        self.pattern = pattern
+        self.criterion = masked_mae
 
     def predict(self, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select'):
         masked = inter2edge_slice(relation, states, phases, mask_pos)
@@ -20,27 +41,13 @@ class SFM_predictor(object):
     def make_model(self, **kwargs):
         return self
 
-    """
-    def sfm_loss():
-        pkl_file = open(file, 'rb')
-        data = pickle.load(pkl_file)
-        # (360,N,11)
-        road_feature = data['road_feature']
-        road_update = data['road_update']
-        adj_road = get_road_adj(relation)
-
-        select_data = np.expand_dims(road_feature[0],0).transpose(0,2,3,1)
-        select_data = mask_op(select_data, road_update, adj_road,'select')
-        y_predict = select_data[:,:,:3,:len(road_feature[0])-1]
-        y_true = np.expand_dims(road_feature[0],0).transpose(0,2,3,1)[:,:,:3,1:]
-        y_predict_re = reconstruct_data(y_predict, relation_file, 'cuda:0')
-        y_true_re = reconstruct_data(y_true, relation_file, 'cuda:0')
-        mae_result = mae(y_true_re,y_predict_re)
-        rmse_result = rmse(y_true_re,y_predict_re)
-        mape_result = mape(y_true_re,y_predict_re)
-        print("Missing Intersection:")
-        print("mae:",mae_result)
-        print("rmse:",rmse_result)
-        print("mape:",mape_result)
-        print("done")
-        """
+    def eval(self, x_test, y_test):
+        y_pred = mask_with_truth(y_test, self.mask_matrix, self.adj_matrix, self.pattern)
+        test_dataset = SFM_dataset(y_pred.transpose(0, 2, 1, 3), y_test.transpose(0, 2, 1, 3))
+        test_loader = DataLoader(test_dataset, batch_size=64)
+        test_loss = 0.0
+        for i, data in enumerate(test_loader):
+            y_pred, y_true = data
+            loss = self.criterion(y_pred.numpy(), y_true.numpy(), self.eval_mask)
+            test_loss += loss
+        print(f'test average loss {test_loss / i}.')

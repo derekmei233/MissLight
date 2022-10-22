@@ -1,16 +1,15 @@
 from torch.cuda import is_available
 from predictionModel.NN import NN_predictor
 from predictionModel.SFM import SFM_predictor
-from predictionModel.GraphWN import GraphWN_predictor
 
 import pickle as pkl
 from utils.preparation import build_relation, get_road_adj, get_mask_matrix, fork_config
 from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents, create_app1maxp_agents, create_independent_agents, create_maxp_agents, create_shared_agents, create_model_based_agents
-from utils.model_utils import get_road_adj_phase
-from utils.data_generation import generate_reward_dataset, build_road_state, generate_state_dataset
+from utils.data_generation import generate_reward_dataset, build_road_state
 from utils.control import fixedtime_execute, app1_trans_train, app1maxp_train, app2_conc_train, app2_shared_train, model_based_shared_train, naive_train, maxp_execute, model_based_shared_train
 from utils.mask_pos import random_mask
 import argparse
+import os
 from pathlib import Path
 from datetime import datetime
 import logging
@@ -22,7 +21,6 @@ import torch
 REWARD_TYPE = 'NN_st'
 SAVE_RATE = 10
 EPOCHS = 50
-HISTORY_LENGTH = 12 # GraphWN should change block and layer accordingly
 IN_DIM = {'NN_st': 20, 'NN_stp': 12, 'NN_sta': 20}
 if torch.has_cuda:
     DEVICE = torch.device('cuda')
@@ -42,7 +40,7 @@ parser.add_argument('--action_interval', type=int, default=10, help='how often a
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
 parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
-parser.add_argument('-impute', default='sfm', choices=['sfm', 'gwn'])
+parser.add_argument('-impute', default='sfm')
 parser.add_argument('-agent', default='FRAP',choices=['DQN','FRAP'])
 parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'S-S-O-model_based'])
 parser.add_argument('--prefix', default='working_pos(6)', type=str)
@@ -98,7 +96,8 @@ if __name__ == "__main__":
     save_reward_file = Path.joinpath(state_dir, f'state_reward.pkl')
     save_state_file = Path.joinpath(state_dir, f'state_phase.pkl')
     save_state_dataset = Path.joinpath(state_dir, f'state_dataset.npy')
-    graphwn_dataset = Path.joinpath(state_dir, f'masked_graphwn_dataset.pkl')
+
+
 
     if saveReplay:
         config_file = fork_config(config_file, str(replay_dir))
@@ -138,22 +137,7 @@ if __name__ == "__main__":
         reward_dataset = generate_reward_dataset(save_reward_file, 8, infer=REWARD_TYPE) # default setting infer == 'st'
         #state_dataset = generate_state_dataset()
         net = NN_predictor(input_dim, 1, DEVICE, model_dir, REWARD_TYPE) # generate reward inference model at model_dir
-        if not net.is_mode():
-            net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
-        else:
-            net.load_model()
-
-        if args.impute == "gwn":
-            adj_matrix, phase_adj = get_road_adj_phase(relation)
-            data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-            with open(graphwn_dataset, 'wb') as f:
-                pkl.dump(data, f)
-            N = data['adj_road'].shape
-            # TODO: GraphWN_p takes more time to train
-            state_net = GraphWN_predictor(N, data['adj_road'], adj_matrix, data['stats'], 11, 3, DEVICE, model_dir)
-            if not state_net.is_model():
-                state_net.train(data['train']['x'], data['train']['target'], data['val']['x'], data['val']['target'], 3) # TODO: 3 for debug
-
+        net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
 
     elif args.control =='F-F':
         agents = create_fixedtime_agents(world, time=args.fix_time)
@@ -194,24 +178,13 @@ if __name__ == "__main__":
         app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
 
     elif args.control == 'S-S-A':
+        # start here
         agents = create_shared_agents(world, mask_pos,agent=args.agent, device=DEVICE)
         env = create_env(world, agents)
-        adj_matrix, phase_adj = get_road_adj_phase(relation)
+        adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        if args.infer == 'sfm':
-            state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-            app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
-        elif args.infer == 'gwn':
-            dj_matrix, phase_adj = get_road_adj_phase(relation)
-            data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-            with open(graphwn_dataset, 'rb') as f:
-                data = pkl.load(f)
-            N = data['adj_road'].shape
-            state_inference_net = GraphWN_predictor(N, data['adj_road'], adj_matrix, data['stats'], 11, 3, DEVICE, model_dir)
-            state_inference_net.load_model()
-            
-            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
-
+        state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
+        app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
 
     elif args.control == 'S-S-O-model_based':
         agents = create_model_based_agents(world, mask_pos, device=DEVICE,agent=args.agent)

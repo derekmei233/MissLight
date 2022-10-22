@@ -42,6 +42,7 @@ def build_relation(world):
     net_shape = shape
     intersections = world.intersections
     roads = world.roadnet['roads']
+    all_inters = world.roadnet['intersections']
     inter_dict_id2inter = {}
     inter_dict_inter2id = {}
     road_dict_id2road = {}
@@ -65,7 +66,17 @@ def build_relation(world):
                                         for road in inter_dic.in_roads]
         inter_out_roads[inter_dic.id] = [road['id']
                                          for road in inter_dic.out_roads]
-        road_links[inter_dic.id] = inter_dic.roadlinks
+        road_links[inter_dic.id] = []
+        for roadlinks_dic in inter_dic.roadlinks:
+            start = roadlinks_dic[0]
+            end = roadlinks_dic[1]
+            for all_inter_dic in all_inters:
+                if all_inter_dic['id'] == inter_dic.id:
+                    for road_link_dic in all_inter_dic['roadLinks']:
+                        if road_link_dic['startRoad'] == start and road_link_dic['endRoad'] == end:
+                            road_links[inter_dic.id].append(
+                                roadlinks_dic + tuple([road_link_dic['type']]) + tuple([road_link_dic['direction']]))
+
 
         inter_nb_num[inter_dic.id] = []
         for in_road_dic in inter_dic.in_roads:
@@ -112,6 +123,7 @@ def get_road_adj(relation):
                              ][road_dict_road2id[target]] = 1
     return adjacency_matrix
 
+"""
 def normalization(train, val, test):
     '''
     Parameters
@@ -144,6 +156,9 @@ def normalization(train, val, test):
     test_norm = normalize(test)
 
     return {'_mean': mean, '_std': std}, train_norm, val_norm, test_norm
+"""
+
+
 
 def mask_op(data, mask_matrix, adj_matrix, data_construct):
     '''
@@ -245,14 +260,16 @@ def normalization(train, val, test):
 
     # ensure the num of nodes is the same
     assert train.shape[1:] == val.shape[1:] and val.shape[1:] == test.shape[1:]
-    mean = train.mean(axis=(0, 1, 3), keepdims=True)
-    std = train.std(axis=(0, 1, 3), keepdims=True)
+    mean = train.mean(axis=(0, 1, 3), keepdims=True)[:,:,0:3,:]
+    std = train.std(axis=(0, 1, 3), keepdims=True)[:,:,0:3,:]
 
     print('mean.shape:', mean.shape)
     print('std.shape:', std.shape)
 
     def normalize(x):
-        return np.nan_to_num((x - mean) / std)
+        noramlized_x = np.nan_to_num((x[:,:,0:3,:] - mean) / std)
+        x[:,:,0:3,:] = noramlized_x
+        return x
         # return (x - mean) / std
 
     train_norm = normalize(train)
@@ -319,6 +336,7 @@ def get_mask_matrix(relation, mask_pos):
                 road_id = road_dict_road2id[road]
                 mask_matrix[road_id] = 2
     return mask_matrix
+
 
 def reconstruct_data_slice(data, phases, relation):
     '''

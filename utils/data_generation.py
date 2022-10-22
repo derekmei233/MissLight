@@ -119,13 +119,13 @@ def time_helper(cur_t, history_t):
     end_t = cur_t + 1
     return start_t, end_t
 
-def generate_state_dataset(state_file, history_t):
+def generate_state_dataset(state_file, history_t, pattern):
     '''
     This function is used for generating data directly used for training GraphWaveNet-r-f
     tans_config stored the hyperparameter used for generating dataset
     read in sample [ E, E_T, N, F]
     return sample should be [1, N, F, T], default = [1, 80, 4, 10]
-    process: [sample, target] -> norm -> data for model_new -> 
+    process: [sample, target] -> norm -> data for model_new -> (only normalize on first 3 features)
     '''
     with open(state_file, 'rb') as f:
         seq_data = np.load(f).transpose(0,2,3,1)
@@ -145,12 +145,15 @@ def generate_state_dataset(state_file, history_t):
     split_1 = int(len(all_sample) * 0.6)
     split_2 = int(len(all_sample) * 0.8)
     train_x, train_label = [np.concatenate(entry, axis=0) for entry in zip(*all_sample[:split_1])] # [B, N, F, T]
-    val_x, val_lable = [np.concatenate(entry, axis=0) for entry in zip(*all_sample[split_1:split_2])]
+    val_x, val_label = [np.concatenate(entry, axis=0) for entry in zip(*all_sample[split_1:split_2])]
     test_x, test_label = [np.concatenate(entry, axis=0) for entry in zip(*all_sample[split_2:])]
     # TODO: imputate at the same time step now
-    train_x = mask_with_truth(train_x, update_rule, adj_matrix, 'select')
-    val_x = mask_with_truth(val_x, update_rule, adj_matrix, 'select')
-    test_x = mask_with_truth(test_x, update_rule, adj_matrix, 'select')
+    train_x = mask_with_truth(train_x, update_rule, adj_matrix, pattern)
+    val_x = mask_with_truth(val_x, update_rule, adj_matrix, pattern)
+    test_x = mask_with_truth(test_x, update_rule, adj_matrix, pattern)
+    train_label = train_label[:, :, 0:3, :]
+    test_label = test_label[:, :, 0:3, :]
+    val_label = val_label[:, :, 0:3, :]
     (stats, train_x, val_x, test_x) = normalization(train_x, val_x, test_x)
     all_data = {
         'train': {
@@ -161,7 +164,7 @@ def generate_state_dataset(state_file, history_t):
         'val': {
             'x': val_x,
             # 'x_phase':val_x[:,:,3:,:],
-            'target': val_lable,
+            'target': val_label,
         },
         'test': {
             'x': test_x,

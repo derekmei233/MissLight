@@ -61,7 +61,7 @@ class NN_predictor(object):
                 self.optimizer.step()
                 train_loss += loss.item()
             print(f'epoch{e}: train average loss {train_loss/ i}.')
-            with torch.no_grad():
+            with no_grad():
                 for i, data in enumerate(test_loader):
                     x, y_true = data
                     x.to(self.DEVICE)
@@ -107,6 +107,11 @@ class NN_predictor(object):
         name = f"NN_inference_{self.reward_type}.pt"
         model_name = os.path.join(self.model_dir, name)
         torch.save(self.model.state_dict(), model_name)
+    
+    def is_mode(self):
+        name = f"NN_inference_{self.reward_type}.pt"
+        model_name = os.path.join(self.model_dir, name)
+        return os.path.isfile(model_name)
 
 
 class N_net(nn.Module):
@@ -125,15 +130,3 @@ class N_net(nn.Module):
         x = F.relu(self.dense_4(x))
         x = self.dense_5(x)
         return x
-
-
-class infer_dataset(Dataset):
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-    
-    def __getitem__(self, index):
-        return self.x[index], self.y[index]
-    
-    def __len__(self):
-        return len(self.x)
