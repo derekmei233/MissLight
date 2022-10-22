@@ -20,16 +20,20 @@ from environment import TSCEnv
 
 class SDQN(nn.Module):
     def __init__(self, size_in, size_out):
-        super(SDQN, self).__init__()
+        super(IDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
         self.dense_2 = nn.Linear(20, 20)
         self.dense_3 = nn.Linear(20, size_out)
+        self.val_dense=nn.Linear(20,1)
 
     def _forward(self, x):
         x = F.relu(self.dense_1(x))
         x = F.relu(self.dense_2(x))
-        x = self.dense_3(x)
-        return x
+        act = self.dense_3(x)
+        val=self.val_dense(x)
+        Q = val + act - act.mean(-1).view(-1, 1)
+        return Q
+
 
     def forward(self, x, train=True):
         if train:
