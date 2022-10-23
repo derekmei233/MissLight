@@ -29,6 +29,7 @@ class SFM_predictor(object):
         self.adj_matrix = adj_matrix
         self.pattern = pattern
         self.criterion = masked_mae
+        self.name = self.__class__.__name__
 
     def predict(self, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select'):
         masked = inter2edge_slice(relation, states, phases, mask_pos)

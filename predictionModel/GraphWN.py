@@ -43,6 +43,7 @@ class GraphWN_predictor(object):
         self._std = torch.from_numpy(stats['_std'].transpose(0,2,1,3)).float().to(self.DEVICE)
         self.mask = torch.from_numpy(np.where(node_update == 1,1,0)[:, np.newaxis].repeat(3, axis=1)).T[np.newaxis,:,:,np.newaxis].float().to(self.DEVICE)
         # to evaluate model on 
+        self.impute_mask = np.where(node_update == 2,1,0)[:, np.newaxis].repeat(3, axis=1)
         self.eval_mask = torch.from_numpy(np.where(node_update == 2,1,0)[:, np.newaxis].repeat(3, axis=1)).T[np.newaxis,:,:,np.newaxis].float().to(self.DEVICE)
         self.criterion = masked_mae
         self.learning_rate = 0.001
@@ -51,6 +52,7 @@ class GraphWN_predictor(object):
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=self.decay)
         self.online_optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate * 0.1, weight_decay=self.decay)
         self.model_dir = Path(model_dir)
+        self.name = self.__class__.__name__
     
     def inverse_scale(self, out):
         result = out * self._std + self._mean
@@ -60,18 +62,20 @@ class GraphWN_predictor(object):
         # TODO: check order and input should be [1, 80, 11, 12]
         # use past input to impute current stat and phase then recover unmasked position
         self.model.eval()
-        x = buffer.get()
+        x = torch.from_numpy(buffer.get().transpose(0,2,1,3)).float().to(self.DEVICE)
         result = states.copy()
         with no_grad():
-            edge_feature = self.inverse_scale(self.model(x))
+            h = self.model(x)
+            edge_feature = self.inverse_scale(h)
             # prediction value used later in GraphWN
-        prediction = reconstruct_data_slice(edge_feature, phases, relation) # current state
+        impute = edge_feature.numpy().transpose(0,2,1,3).squeeze().squeeze()
+        prediction = reconstruct_data_slice(impute, None, relation) # current state
         masked = inter2edge_slice(relation, states, phases, mask_pos)
         infer = mask_op(masked, mask_matrix, adj_matrix, mode)
         refill = infer + masked
-        refill[:, :3] = edge_feature * self.eval_mask
+        refill[:, :3] = impute * self.impute_mask
         new_buffer = refill
-        buffer.add(new_buffer[:, :, np.newaxis])
+        buffer.add(new_buffer[np.newaxis, :, :, np.newaxis])
         for i in mask_pos:
             # mask with inference value        
             result[i, :] = prediction[i, :]
@@ -113,7 +117,7 @@ class GraphWN_predictor(object):
             train_loss = 0.0
             val_loss = 0.0
         return self.model
-    
+
     def eval(self, x_test, y_test):
         self.load_model()
         self.model.eval()
