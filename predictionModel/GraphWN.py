@@ -44,6 +44,7 @@ class GraphWN_predictor(object):
         self.mask = torch.from_numpy(np.where(node_update == 1,1,0)[:, np.newaxis].repeat(3, axis=1)).T[np.newaxis,:,:,np.newaxis].float().to(self.DEVICE)
         # to evaluate model on 
         self.impute_mask = np.where(node_update == 2,1,0)[:, np.newaxis].repeat(3, axis=1)
+        self.reserve_mask = np.where(node_update != 2,1,0)[:, np.newaxis].repeat(3, axis=1)
         self.eval_mask = torch.from_numpy(np.where(node_update == 2,1,0)[:, np.newaxis].repeat(3, axis=1)).T[np.newaxis,:,:,np.newaxis].float().to(self.DEVICE)
         self.criterion = masked_mae
         self.learning_rate = 0.001
@@ -73,13 +74,17 @@ class GraphWN_predictor(object):
         masked = inter2edge_slice(relation, states, phases, mask_pos)
         infer = mask_op(masked, mask_matrix, adj_matrix, mode)
         refill = infer + masked
-        refill[:, :3] = impute * self.impute_mask
+        refill[:, :3] = impute * self.impute_mask + refill[:, :3] * self.reserve_mask
         new_buffer = refill
         buffer.add(new_buffer[np.newaxis, :, :, np.newaxis])
         for i in mask_pos:
             # mask with inference value        
             result[i, :] = prediction[i, :]
         return result
+
+    def train_while_control(self, x, target):
+        pass
+
 
     def train(self, x_train, y_train, x_val, y_val, epochs):
         self.model.train()
@@ -133,10 +138,6 @@ class GraphWN_predictor(object):
                 loss = self.criterion(self.inverse_scale(y_pred), y_true, self.eval_mask)
                 test_loss += loss.item()
         print(f'test average loss {test_loss / i}.')
-
-    
-    def train_while_control(self, x, target):
-        pass
 
     def make_model(self):
         model = GraphW_net(N=self.nodes, adj_matrix=self.adj_matrix, in_dim=self.in_dim, out_dim=self.out_dim).float()

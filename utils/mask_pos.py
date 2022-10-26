@@ -61,7 +61,7 @@ def random_mask(num, policy, relation):
 
 if __name__ == '__main__':
     from world import World
-    config_file = 'cityflow_hz4x4.cfg'
+    config_file = 'cityflow_ny16x3.cfg'
     world = World(config_file, thread_num=8)
     relation = build_relation(world)
     mask = random_mask(2, 'neighbor', relation)

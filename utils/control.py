@@ -18,7 +18,7 @@ import torch
 def fixedtime_execute(logger, env, agents, action_interval, relation):
     env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
-    save_dir = name[name.index('\output_data'): name.index('\logging')]
+    save_dir = name[name.index('output_data'): name.index('logging')]
     env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_0.txt"))
     logger.info(f"FixedTime - FixedTime control")
     i = 0
@@ -122,6 +122,7 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
         env.eng.set_save_replay(True)
         name = logger.handlers[0].baseFilename
         save_dir = Path(name[name.index('output_data'): name.index('logging')])
+        tmp = os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e)
         env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e))
     else:
         env.eng.set_save_replay(False)
@@ -978,6 +979,7 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
     record = MSEMetric('state mse', mask_pos)
     reward_record = MSEMetric('reward mse', mask_pos)
     for e in range(episode):
+        state_buffer.clear()
         last_obs = env.reset()
         last_states, last_phases = list(zip(*last_obs))
         last_states = np.array(last_states, dtype=np.float32)
@@ -993,7 +995,6 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
         episodes_decision_num = 0
         episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
         i = 0
-        state_buffer.clear()
         while i < 3600:
             if i % action_interval == 0:
                 for ag in agents:
@@ -1107,6 +1108,129 @@ def app2_shared_execute_v2(logger, env, agents, e, best_att, record, state_infer
                 recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
             elif imputation_method == 'GraphWN_predictor':
                 recovered = state_inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+            record.add(states, recovered)
+    att = env.eng.get_average_travel_time()
+    cur_mse = record.get_cur_result()
+    record.update()
+    if att < best_att:
+        best_att = att
+    logger.info("episode:{}, Test:{}".format(e, att))
+    logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    return best_att
+
+def app1_trans_train_v2(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, device, save_rate, agent_name, t_history):
+    # this method is used in approach 1 ,transfer and approach 2, shared-parameter. 
+    logger.info(f"SHARED {agent_name} - O control")
+    total_decision_num = 0
+    best_att = np.inf
+    record = MSEMetric('state mse', mask_pos)
+    imputation_method = inference_net.name
+    state_buffer = full_traj_buffer(t_history)
+    for e in range(episode):
+        state_buffer.clear()
+        last_obs = env.reset()
+        last_states, last_phases = list(zip(*last_obs))
+        last_states = np.array(last_states, dtype=np.float32)
+        last_phases = np.array(last_phases, dtype=np.int8)
+        # only recover state_t since we need this var to determine action t
+        if imputation_method == 'SFM_predictor':
+            # TODO: forward test
+            last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        elif imputation_method == 'GraphWN_predictor':
+            last_recovered = inference_net.predict(state_buffer, last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+        record.add(last_states, last_recovered)
+        episodes_decision_num = 0
+        episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
+        i = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                for ag in agents:
+                    if total_decision_num > ag.learning_start:
+                        actions = ag.choose(last_recovered, last_phases, relation)
+                    else:
+                        actions = ag.sample()
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, dones, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards_train = np.mean(rewards_list, axis=0)
+                rewards = np.mean(rewards_train, axis=1)
+
+                cur_states, cur_phases = list(zip(*obs))
+                cur_states = np.array(cur_states, dtype=np.float32)
+                cur_phases = np.array(cur_phases, dtype=np.int8)
+                if imputation_method == 'SFM_predictor':
+                    cur_recovered = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                elif imputation_method == 'GraphWN_predictor':
+                    cur_recovered = inference_net.predict(state_buffer, cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                record.add(cur_states, cur_recovered)
+                for ag in (agents):
+                    for idx in ag.idx:
+                        ag.remember(
+                            (last_recovered[idx], last_phases[idx]), actions[idx], rewards[idx], (cur_recovered[idx], cur_phases[idx]), idx)
+                        episodes_rewards[idx] += rewards[idx]
+                        episodes_decision_num += 1
+                total_decision_num += 1
+                last_obs = obs
+                last_states = cur_states
+                last_phases = cur_phases
+                last_recovered = cur_recovered
+            for ag in agents:
+                # only use experiences at observable intersections
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
+                    ag.replay()
+                if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
+                    ag.update_target_network()
+        cur_mse = record.get_cur_result()
+        record.update()
+        logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
+        best_att = app1_trans_execute_v2(logger, env, agents, e, best_att, record, inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate, state_buffer)
+    avg_mse = record.get_result()
+    logger.info(f'approach 1: transfer {agent_name} average travel time result: {best_att}')
+    logger.info(f'final mse is: {avg_mse}')
+    logger.info('-' * 50)
+    return record
+
+def app1_trans_execute_v2(logger, env, agents, e, best_att, record, inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate, state_buffer):
+    if e % save_rate == save_rate - 1:
+        env.eng.set_save_replay(True)
+        name = logger.handlers[0].baseFilename
+        save_dir = Path(name[name.index('output_data'): name.index('logging')])
+        env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e))
+    else:
+        env.eng.set_save_replay(False)
+    i = 0
+    state_buffer.clear()
+    obs = env.reset()
+    imputation_method = inference_net.name
+    states, phases = list(zip(*env.reset()))
+    states = np.array(states, dtype = np.float32)
+    phases = np.array(phases, dtype = np.int8)
+    if imputation_method == 'SFM_predictor':
+        # TODO: forward test
+        recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
+    elif imputation_method == 'GraphWN_predictor':
+        recovered = inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+    record.add(states, recovered)
+    while i < 3600:
+        if i % action_interval == 0:
+            # TODO: implement other State inference model later
+            # SFM inference states
+            for ag in agents:
+                actions = ag.get_action(recovered, phases, relation)
+            for _ in range(action_interval):
+                obs, rewards, dones, _ = env.step(actions)
+                i += 1
+            states, phases = list(zip(*obs))
+            states = np.array(states, dtype = np.float32)
+            phases = np.array(phases, dtype = np.int8)
+            if imputation_method == 'SFM_predictor':
+                # TODO: forward test
+                recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
+            elif imputation_method == 'GraphWN_predictor':
+                recovered = inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
             record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
