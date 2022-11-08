@@ -286,15 +286,17 @@ class FRAP_SH_Agent(RLAgent):
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
         # expand action to one_hot
-        obs_oh = np.zeros((batch_size*self.learnable, 1))
-        for i in range(batch_size*self.learnable):
-            obs_oh[i] = obs[1][i]
+        #obs_oh = np.zeros((batch_size*self.learnable, 1))
+        #for i in range(batch_size*self.learnable):
+            #obs_oh[i] = obs[1][i]
+        obs_oh=np.expand_dims(obs[1],dim=1)
         obs = np.concatenate((obs_oh, obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = np.zeros((batch_size*self.learnable, 1))
-        for i in range(batch_size*self.learnable):
-            next_obs_oh[i] = next_obs[1][i]
+        #next_obs_oh = np.zeros((batch_size*self.learnable, 1))
+        #for i in range(batch_size*self.learnable):
+            #next_obs_oh[i] = next_obs[1][i]
+        next_obs_oh=np.expand_dims(next_obs[1],dim=1)
         # next_obs_oh[0]=next_obs[1].squeeze()
         # next_obs_oh = one_hot(next_obs[1], self.action_space.n)
         next_obs = np.concatenate((next_obs_oh, next_obs[0]), axis=1)
