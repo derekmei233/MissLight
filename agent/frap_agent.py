@@ -168,17 +168,19 @@ class FRAP_DQNAgent(RLAgent):
         #obs_oh = one_hot(obs[1], self.action_space.n)
         #obs_oh= []
         #print(obs)
-        obs_oh=np.zeros((64,1))
-        for i in range(64):
-            obs_oh[i] = obs[1][i]
+        #obs_oh=np.zeros((64,1))
+        #for i in range(64):
+            #obs_oh[i] = obs[1][i]
+        obs_oh=np.expand_dims(obs[1],dim=1)
         obs = np.concatenate((obs_oh,obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = np.zeros((64, 1))
-        for i in range(64):
-            next_obs_oh[i] = next_obs[1][i]
+        #next_obs_oh = np.zeros((64, 1))
+        #for i in range(64):
+            #next_obs_oh[i] = next_obs[1][i]
         #next_obs_oh[0]=next_obs[1].squeeze()
         #next_obs_oh = one_hot(next_obs[1], self.action_space.n)
+        next_obs_oh=np.expand_dims(next_obs[1],dim=1)
         next_obs = np.concatenate((next_obs_oh,next_obs[0]), axis=1)
         rewards = np.array(rewards_t, copy=False)
         obs = torch.from_numpy(obs).float().to(self.device)
