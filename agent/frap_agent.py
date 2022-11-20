@@ -81,8 +81,8 @@ class FRAP_DQNAgent(RLAgent):
         #         if self.ob_generator.ob_length == 8:
         #             self.dic_phase_expansion = self.dic_traffic_env_conf.param["phase_expansion_8"]
 
-        self.model = self._build_model()
-        self.target_model = self._build_model()
+        self.model = self._build_model().to(self.device)
+        self.target_model = self._build_model().to(self.device)
         self.update_target_network()
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.learning_rate, eps=1e-7)
@@ -101,7 +101,7 @@ class FRAP_DQNAgent(RLAgent):
                 if len(list(set(pair_a + pair_b))) == 3: zeros[cnt] = 1
                 cnt += 1
             comp_mask.append(zeros)
-        comp_mask = torch.from_numpy(np.asarray(comp_mask))
+        comp_mask = torch.from_numpy(np.asarray(comp_mask)).to(self.device)
         return comp_mask
 
     def choose(self, ob, phase, relation=None):
@@ -136,11 +136,11 @@ class FRAP_DQNAgent(RLAgent):
         ob_oh=phase[self.idx:self.idx+1,:]
         #print(len(ob_oh[0]))
         #print(ob[self.idx:self.idx+1,:])
-        obs = torch.tensor(np.concatenate((ob_oh,ob[self.idx:self.idx+1,:]),axis=1)).float()
+        obs = torch.tensor(np.concatenate((ob_oh,ob[self.idx:self.idx+1,:]),axis=1)).float().to(self.device)
         #print(obs)
         act_values = self.model.forward(obs, train=False)
         #actions = self.model(observation, train=True)  # 1, 8
-        return torch.argmax(act_values)
+        return torch.argmax(act_values).cpu()
 
     def sample(self):
         return self.action_space.sample()
@@ -168,17 +168,19 @@ class FRAP_DQNAgent(RLAgent):
         #obs_oh = one_hot(obs[1], self.action_space.n)
         #obs_oh= []
         #print(obs)
-        obs_oh=np.zeros((64,1))
-        for i in range(64):
-            obs_oh[i] = obs[1][i]
+        #obs_oh=np.zeros((64,1))
+        #for i in range(64):
+            #obs_oh[i] = obs[1][i]
+        obs_oh=np.expand_dims(obs[1],axis=1)
         obs = np.concatenate((obs_oh,obs[0]), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = np.zeros((64, 1))
-        for i in range(64):
-            next_obs_oh[i] = next_obs[1][i]
+        #next_obs_oh = np.zeros((64, 1))
+        #for i in range(64):
+            #next_obs_oh[i] = next_obs[1][i]
         #next_obs_oh[0]=next_obs[1].squeeze()
         #next_obs_oh = one_hot(next_obs[1], self.action_space.n)
+        next_obs_oh=np.expand_dims(next_obs[1],axis=1)
         next_obs = np.concatenate((next_obs_oh,next_obs[0]), axis=1)
         rewards = np.array(rewards_t, copy=False)
         obs = torch.from_numpy(obs).float().to(self.device)
@@ -192,6 +194,8 @@ class FRAP_DQNAgent(RLAgent):
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         # 4 output
         out = self.target_model.forward(next_obs, train=False)
+        #print(rewards.shape)
+        #print(out.shape)
         target = rewards + self.gamma * torch.max(out, dim=1)[0]
         target_f = self.model.forward(obs, train=False)
         for i, action in enumerate(actions):
@@ -242,6 +246,7 @@ class FRAP(nn.Module):
         self.p_out = 4  # size of phase embedding
         self.lane_embed_units = 16
         relation_embed_size = 4
+        self.device=torch.device('cuda') if torch.has_cuda else torch.device('cpu')
 
         self.p = nn.Embedding(2, self.p_out)
         self.d = nn.Linear(self.demand_shape, self.d_out)
@@ -284,7 +289,7 @@ class FRAP(nn.Module):
                 zeros[pair[0]] = 1
                 zeros[pair[1]] = 1
                 extended_acts.append(zeros)
-            extended_acts = torch.stack(extended_acts)
+            extended_acts = torch.stack(extended_acts).to(self.device)
         else:
             extended_acts = acts
         #print(acts)
@@ -330,7 +335,7 @@ class FRAP(nn.Module):
 
         # Phase competition mask
         competition_mask = self.comp_mask.repeat((batch_size, 1, 1))
-        relations = F.relu(self.relation_embedding(competition_mask))
+        relations = F.relu(self.relation_embedding(competition_mask.long()))
         relations = relations.permute(0, 3, 1, 2)  # Move channels up
         relations = F.relu(self.relation_conv(relations))  # Pair demand representation
 

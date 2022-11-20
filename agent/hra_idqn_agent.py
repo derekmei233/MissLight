@@ -16,14 +16,15 @@ class IDQN(nn.Module):
     def __init__(self, size_in, size_out):
         super(IDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
-        self.dense_2 = nn.Linear(20, 20)
+        self.dense_2 = nn.Linear(20, 20*12)
         self.dense_3 = nn.Linear(20, size_out)
 
     def _forward(self, x):
         x = F.relu(self.dense_1(x))
-        x = F.relu(self.dense_2(x))
-        x = self.dense_3(x)
-        return x
+        x_all = F.relu(self.dense_2(x)).chunk(12,-1)
+
+        x_out = [self.dense_3(x_all[i]) for i in range(12)]
+        return x_out
 
     def forward(self, x, train=True):
         if train:
@@ -34,7 +35,7 @@ class IDQN(nn.Module):
 
 
 class IDQNAgent(RLAgent):
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx,device):
         super().__init__(action_space, ob_generator, reward_generator)
 
         self.iid = iid
@@ -42,6 +43,9 @@ class IDQNAgent(RLAgent):
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)
+        self.dense=nn.Linear(96,8)
+        self.sub_agents=1
+        self.name = self.__class__.__name__
 
         self.memory = deque(maxlen=4000)
         self.learning_start = 200
@@ -60,20 +64,20 @@ class IDQNAgent(RLAgent):
         self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False, eps=1e-7)
         self.update_target_network()
 
-    def choose(self, ob):
+    def choose(self, ob, phase, relation=None):
         if np.random.rand() <= self.epsilon:
             return self.action_space.sample()
-        ob_oh = one_hot(ob[1], self.action_space.n)
-        ob = torch.tensor(np.concatenate((ob[0], ob_oh))).float()
-        act_values = self.model.forward(ob)
-        return torch.argmax(act_values)
+        return self.get_action(ob, phase, relation)
 
     def get_action(self, ob, phase, relation=None):
         # get all observation now
         ob_oh = one_hot(phase[self.idx], self.action_space.n)
         obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float()
         act_values = self.model.forward(obs)
-        return torch.argmax(act_values)
+        act=act_values[0]
+        for i in range(1,12):
+            act+=act_values[i]
+        return torch.argmax(act)
     
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
@@ -118,11 +122,22 @@ class IDQNAgent(RLAgent):
         
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         out = self.target_model.forward(next_obs, train=False)
-        target = rewards + self.gamma * torch.max(out, dim=1)[0]
-        target_f = self.model.forward(obs, train=False)
-        for i, action in enumerate(actions):
-            target_f[i][action] = target[i]
-        loss = self.criterion(self.model.forward(obs, train=True), target_f)
+        target=list()
+        for i in range(12):
+            target.append(rewards[:,i] + self.gamma * torch.max(out[i], dim=1)[0])
+        target_f=list()
+        #target=self.dense(torch.cat(target,dim=-1))
+        out2 = self.model.forward(obs, train=False)
+        for i in range(12):
+            target_f.append(out2[i])
+        for it in range(12):
+            for i, action in enumerate(actions):
+                target_f[it][i][action] = target[it][i]
+        out3=self.model.forward(obs, train=True)
+        #target_p=list()
+        loss= self.criterion(out3[0],target_f[0])
+        for i in range(1,12):
+             loss+=self.criterion(out3[i], target_f[i])
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
