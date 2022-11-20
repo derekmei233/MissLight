@@ -25,29 +25,27 @@ HISTORY_LENGTH = 12 # GraphWN should change block and layer accordingly
 IN_DIM = {'NN_st': 20, 'NN_stp': 12, 'NN_sta': 20}
 if torch.has_cuda:
     DEVICE = torch.device('cuda')
-#elif torch.has_mps:
-    # TODO: fix placeholder problem later
-
-    #DEVICE = torch.device('cpu')
+elif torch.has_mps:
+    DEVICE = torch.device('mps')
 else:
     DEVICE = torch.device('cpu')
 
 # TODO: test on different reward impute(t or pt) first
 # TODO: var = [Imputation/Agent/Control/prefix]
 parser = argparse.ArgumentParser(description='IDQN - FixedTime generate dataset for reward inference model')
-parser.add_argument('--config', type=str, default='ny16x3', help='network working on')
+parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
 parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
-parser.add_argument('-impute', default='sfm', choices=['sfm', 'gwn'])
+parser.add_argument('-impute', default='gwn', choices=['sfm', 'gwn'])
 parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'])
-parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
+parser.add_argument('-control', default='S-S-A', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
 parser.add_argument('--prefix', default='test', type=str)
 
 parser.add_argument('--debug', action='store_true')
-parser.add_argument('--mask_pos', default='1,36,9', type=str)
+parser.add_argument('--mask_pos', default='3,6,14', type=str)
 
 
 if __name__ == "__main__":
@@ -117,7 +115,7 @@ if __name__ == "__main__":
     logger.info(f"mask_pos: {mask_pos}")
 
     if args.control == 'I-F':
-        gen_agents = create_preparation_agents(world, mask_pos,time=args.fix_time,agent=args.agent, device=DEVICE)
+        gen_agents = create_preparation_agents(world, mask_pos,time=args.fix_time,agent=args.agent, device='cpu')
         env = create_env(world, gen_agents)
         # environment preparation, in_dim == 20 [lanes:3 * roads:4 + phases:8] = 20
         input_dim = 20
@@ -155,7 +153,6 @@ if __name__ == "__main__":
             state_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
             if not state_net.is_model():
                 state_net.train(data['train']['x'], data['train']['target'], data['val']['x'], data['val']['target'], 30) # TODO: 3 for debug
-
 
     elif args.control =='F-F':
         agents = create_fixedtime_agents(world, time=args.fix_time)
@@ -207,7 +204,7 @@ if __name__ == "__main__":
         app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
 
     elif args.control == 'S-S-A':
-        agents = create_shared_agents(world, mask_pos,agent=args.agent, device=DEVICE)
+        agents = create_shared_agents(world, mask_pos,agent=args.agent, device='cpu')
         env = create_env(world, agents)
         adj_matrix, phase_adj = get_road_adj_phase(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
@@ -222,7 +219,7 @@ if __name__ == "__main__":
             N = data['adj_road'].shape[0]
             state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
             state_inference_net.load_model()
-            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
+            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device='cpu', save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
 
 
     elif args.control == 'S-S-O-model_based':

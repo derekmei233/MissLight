@@ -26,18 +26,26 @@ def fixedtime_execute(logger, env, agents, action_interval, relation):
     states, phases = list(zip(*obs))
     states = np.array(states, dtype=np.float32)
     phases = np.array(phases, dtype=np.int8)
+    delay_list = np.zeros([1, len(agents)])
+    count = 0
     for i in range(3600):
         if i % action_interval == 0:
             actions = []
+            delays = []
             for ag in agents:
                 action = ag.get_action(states, phases, relation)
+                delay = ag.get_delay()
                 actions.append(action)
+                delays.append(delay)
             for _ in range(action_interval):
                 env.step(actions)
                 i += 1
+            delay_list += np.array(delays)
+            count += 1
     att = env.eng.get_average_travel_time()
     logger.info(f'FixedTime time interval: {agents[0].time}')
     logger.info(f'FixedTime average travel time result: {att}')
+    logger.info(f'delay: {np.array(delay_list) / count}')
     logger.info('-' * 50)
     return None
 
@@ -58,8 +66,6 @@ def naive_train(logger, env, agents, episodes, action_interval, save_rate, agent
         #print(last_obs)
         save_state.append(last_obs)
         last_states,last_phases = list(zip(*last_obs))
-        #print(last_phases)
-        #print(last_states)
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         episodes_rewards = [0 for _ in agents]
@@ -138,11 +144,17 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
     observable = []
     rewards_observable = []
     actions_observable = []
+    delay_list = np.zeros([1, len(agents)])
+    count = 0
     while i < 3600:
         if i % action_interval == 0:
             actions = []
+            delays = []
             for agent_id, agent in enumerate(agents):
                 actions.append(agent.get_action(last_states, last_phases))
+                delays.append(agent.get_delay())
+            delay_list += np.array(delays)
+            count += 1
             rewards_list = []
             for _ in range(action_interval):
                 obs, rewards, _, _ = env.step(actions)
@@ -171,6 +183,7 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
     if att < best_att:
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
+    logger.info(f'delay: {np.array(delay_list) / count}')
     return best_att
 
 # M-M
@@ -296,23 +309,30 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     phases = np.array(phases, dtype=np.int8)
     recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
+    delay_list = np.zeros([1, len(agents)])
+    count = 0
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
             actions = []
+            delays = []
             for ag in agents:
                 #if ag.name == 'MaxPressureAgent':
                 if ag.name == 'MaxPressureAgent':
                     action = ag.get_action(recovered, phases, relation)
+                    delays.append(ag.get_delay())
                 ## elif ag.name =='IDQNAgent':
                 else:
                     action = ag.get_action(recovered, phases)
+                    delays.append(ag.get_delay())
                 actions.append(action)
+            delay_list += np.array(delays)
+            count += 1
             for _ in range(action_interval):
                 obs, _, _, _ = env.step(actions)
                 i += 1
-            
+
             states, phases = list(zip(*obs))
             states = np.array(states, dtype=np.float32)
             phases = np.array(phases, dtype=np.int8)
@@ -325,6 +345,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info(f'delay: {np.array(delay_list) / count}')
     return best_att
 
 # S-S-O
@@ -408,12 +429,17 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
     phases = np.array(phases, dtype = np.int8)
     recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
+    delay_list = np.zeros([1, agents[0].sub_agents])
+    count = 0
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
             for ag in agents:
                 actions = ag.get_action(recovered, phases, relation)
+                delays = ag.get_delay()
+            delay_list += np.array(delays)
+            count += 1
             for _ in range(action_interval):
                 obs, rewards, dones, _ = env.step(actions)
                 i += 1
@@ -429,6 +455,7 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info(f'delay: {np.array(delay_list) / count}')
     return best_att
 
 # I-I
@@ -676,14 +703,20 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
     phases = np.array(phases, dtype = np.int8)
     recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
+    delay_list = np.zeros([1, len(agents)])
+    count = 0
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
             # SFM inference states
             actions = []
+            delays = []
             for ag in agents:
                 action = ag.get_action(recovered, phases, relation)
                 actions.append(action)
+                delays.append(ag.get_delay())
+            count += 1
+            delay_list += np.array(delays)
             for _ in range(action_interval):
                 obs, rewards, dones, _ = env.step(actions)
                 i += 1
@@ -699,6 +732,7 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info(f'delay: {np.array(delay_list) / count}')
     return best_att
 
 def app2_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, device, save_rate,agent_name):
@@ -814,6 +848,8 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     phases = np.array(phases, dtype = np.int8)
     recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
+    delay_list = np.zeros([1, agents[0].sub_agents])
+    count = 0
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
@@ -821,6 +857,9 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
             actions = []
             for ag in agents:
                 actions = ag.get_action(recovered, phases, relation)
+                delays = ag.get_delay()
+            delay_list += np.array(delays)
+            count += 1
             for _ in range(action_interval):
                 obs, rewards, dones, _ = env.step(actions)
                 i += 1
@@ -836,6 +875,7 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info(f'delay: {np.array(delay_list) / count}')
     return best_att
 
 def model_based_shared_train(logger, env, agents, episode, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, model_dir, reward_type, device, save_rate, agent_name,update_times=10):
@@ -979,6 +1019,8 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
     record = MSEMetric('state mse', mask_pos)
     reward_record = MSEMetric('reward mse', mask_pos)
     for e in range(episode):
+        impute_loss = 0.0
+        impute_count = 0
         state_buffer.clear()
         last_obs = env.reset()
         last_states, last_phases = list(zip(*last_obs))
@@ -989,7 +1031,9 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
             # TODO: forward test
             last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
         elif imputation_method == 'GraphWN_predictor':
-            last_recovered = state_inference_net.predict(state_buffer, last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+            last_recovered, los = state_inference_net.predict(state_buffer, last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+            impute_loss += los
+            impute_count += 1
         record.add(last_states, last_recovered)
 
         episodes_decision_num = 0
@@ -1036,7 +1080,9 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
                 if imputation_method == 'SFM_predictor':
                     cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
                 elif imputation_method == 'GraphWN_predictor':
-                    cur_recovered = state_inference_net.predict(state_buffer, cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                    cur_recovered, los = state_inference_net.predict(state_buffer, cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                    impute_loss += los
+                    impute_count += 1
                 record.add(cur_states, cur_recovered)
                 for ag in agents:
                     for idx in ag.idx:
@@ -1062,6 +1108,7 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
         logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
         logger.info("episode:{}, Reward_MSETrain:{}".format(e, reward_cur_mse))
+        logger.info("episode:{}, loss for predict is {}".format(e, impute_loss/impute_count))
         best_att = app2_shared_execute_v2(logger, env, agents, e, best_att, record, state_inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate, state_buffer)
     avg_mse = record.get_result()
     logger.info(f'approach 2: shared {agent_name} average travel time result: {best_att}')
@@ -1088,8 +1135,8 @@ def app2_shared_execute_v2(logger, env, agents, e, best_att, record, state_infer
         # TODO: forward test
         recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
     elif imputation_method == 'GraphWN_predictor':
-        recovered = state_inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
-    record.add(states, recovered)
+        recovered, los = state_inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+    record.add(states, recovered) 
     while i < 3600:
         if i % action_interval == 0:
             # TODO: implement other State inference model later
@@ -1107,7 +1154,7 @@ def app2_shared_execute_v2(logger, env, agents, e, best_att, record, state_infer
                 # TODO: forward test
                 recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
             elif imputation_method == 'GraphWN_predictor':
-                recovered = state_inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                recovered, los = state_inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
             record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()

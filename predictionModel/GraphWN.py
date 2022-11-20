@@ -6,7 +6,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import torch.optim as optim 
 from pathlib import Path
-from utils.preparation import inter2edge_slice, mask_op, reconstruct_data_slice, one_hot
+from utils.preparation import inter2edge_slice, mask_op, reconstruct_data_slice, one_hot, normalize
+import time
+from tqdm import tqdm
 # implementation based on https://github.com/nnzhan/Graph-WaveNet with some modification
 # dataset [B, T, N, F], input [B, F, N ,T]
 
@@ -14,8 +16,8 @@ from utils.preparation import inter2edge_slice, mask_op, reconstruct_data_slice,
 class GraphWN_dataset(Dataset):
     def __init__(self, feature, target):
         self.len = len(feature)
-        self.features = torch.from_numpy(feature).float()
-        self.target = torch.from_numpy(target).float()
+        self.features = feature.float()
+        self.target = target.float()
 
     def __getitem__(self, idx):
         return self.features[idx, :], self.target[idx]
@@ -36,9 +38,8 @@ class GraphWN_predictor(object):
         self.out_dim = out_dim
         self.nodes = N
         self.adj_matrix = adj_matrix
-        self.model = self.make_model()
         self.DEVICE = DEVICE
-        self.model.to(DEVICE).float()
+        self.model = self.make_model().float()
         self._mean = torch.from_numpy(stats['_mean'].transpose(0,2,1,3)).float().to(self.DEVICE)
         self._std = torch.from_numpy(stats['_std'].transpose(0,2,1,3)).float().to(self.DEVICE)
         self.mask = torch.from_numpy(np.where(node_update == 1,1,0)[:, np.newaxis].repeat(3, axis=1)).T[np.newaxis,:,:,np.newaxis].float().to(self.DEVICE)
@@ -54,33 +55,40 @@ class GraphWN_predictor(object):
         self.online_optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate * 0.1, weight_decay=self.decay)
         self.model_dir = Path(model_dir)
         self.name = self.__class__.__name__
-    
+
     def inverse_scale(self, out):
         result = out * self._std + self._mean
+        return result
+
+    def scale(self, out):
+        result = out
+        result[:, 0:3, :, :] = (out[:, 0:3, :, :] -self._mean) / self._std
         return result
 
     def predict(self,buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select'):
         # TODO: check order and input should be [1, 80, 11, 12]
         # use past input to impute current stat and phase then recover unmasked position
         self.model.eval()
-        x = torch.from_numpy(buffer.get().transpose(0,2,1,3)).float().to(self.DEVICE)
+        x = self.scale(torch.from_numpy(buffer.get().transpose(0,2,1,3)).float().to(self.DEVICE))
         result = states.copy()
+        y_true_numpy = inter2edge_slice(relation, result, phases, mask_pos)
+        y_true = torch.from_numpy(y_true_numpy).float().to(self.DEVICE)
         with no_grad():
             h = self.model(x)
             edge_feature = self.inverse_scale(h)
             # prediction value used later in GraphWN
-        impute = edge_feature.numpy().transpose(0,2,1,3).squeeze().squeeze()
+            loss = self.criterion(edge_feature, y_true, self.mask)
+        impute = edge_feature.to("cpu").numpy().transpose(0,2,1,3).squeeze().squeeze()
         prediction = reconstruct_data_slice(impute, None, relation) # current state
-        masked = inter2edge_slice(relation, states, phases, mask_pos)
-        infer = mask_op(masked, mask_matrix, adj_matrix, mode)
-        refill = infer + masked
-        refill[:, :3] = impute * self.impute_mask + refill[:, :3] * self.reserve_mask
-        new_buffer = refill
+        infer = mask_op(y_true_numpy, mask_matrix, adj_matrix, mode)
+
+        infer[:, :3] = impute * self.impute_mask + infer[:, :3] * self.reserve_mask
+        new_buffer = infer
         buffer.add(new_buffer[np.newaxis, :, :, np.newaxis])
         for i in mask_pos:
             # mask with inference value        
             result[i, :] = prediction[i, :]
-        return result
+        return result, loss
 
     def train_while_control(self, x, target):
         pass
@@ -91,16 +99,27 @@ class GraphWN_predictor(object):
         train_loss = 0.0
         val_loss = 0.0
         best_loss = np.inf
-        train_dataset = GraphWN_dataset(x_train.transpose(0, 2, 1, 3), y_train.transpose(0, 2, 1, 3))
-        val_dataset = GraphWN_dataset(x_val.transpose(0, 2, 1, 3), y_val.transpose(0, 2, 1, 3))
-        train_loader = DataLoader(train_dataset, batch_size=64)
-        val_loader = DataLoader(val_dataset, batch_size=64)
+        train_dataset = GraphWN_dataset(torch.from_numpy(x_train.transpose(0, 2, 1, 3)), torch.from_numpy(y_train.transpose(0, 2, 1, 3)))
+        val_dataset = GraphWN_dataset(torch.from_numpy(x_val.transpose(0, 2, 1, 3)), torch.from_numpy(y_val.transpose(0, 2, 1, 3)))
+        train_loader = DataLoader(train_dataset, batch_size=128)
+        val_loader = DataLoader(val_dataset, batch_size=128)
+        begin = time.time()
+        with no_grad():
+            for i, data in enumerate(val_loader):
+                x, y_true = data
+                x = x.to(self.DEVICE)
+                y_true = y_true.to(self.DEVICE)
+                y_pred = self.model(x)
+                loss = self.criterion(self.inverse_scale(y_pred), y_true, self.mask)
+                val_loss += loss.item()
+        print(f'before training val average loss {val_loss / i}.')
+        val_loss = 0.0
         for e in range(epochs):
-            for i, data in enumerate(train_loader):
+            for i, data in enumerate(tqdm(train_loader)):
                 x, y_true = data
                 self.optimizer.zero_grad()
-                x.to(self.DEVICE)
-                y_true.to(self.DEVICE)
+                x = x.to(self.DEVICE)
+                y_true = y_true.to(self.DEVICE)
                 y_pred = self.model(x)
                 loss = self.criterion(self.inverse_scale(y_pred), y_true,  self.mask)
                 loss.backward()
@@ -110,8 +129,8 @@ class GraphWN_predictor(object):
             with no_grad():
                 for i, data in enumerate(val_loader):
                     x, y_true = data
-                    x.to(self.DEVICE)
-                    y_true.to(self.DEVICE)
+                    x = x.to(self.DEVICE)
+                    y_true = y_true.to(self.DEVICE)
                     y_pred = self.model(x)
                     loss = self.criterion(self.inverse_scale(y_pred), y_true, self.mask)
                     val_loss += loss.item()
@@ -121,13 +140,15 @@ class GraphWN_predictor(object):
             print(f'epoch{e}: val average loss {val_loss / i}.')
             train_loss = 0.0
             val_loss = 0.0
+        end = time.time()
+        print(end - begin)
         return self.model
 
     def eval(self, x_test, y_test):
         self.load_model()
         self.model.eval()
-        test_dataset = GraphWN_dataset(x_test.transpose(0, 2, 1, 3), y_test.transpose(0, 2, 1, 3))
-        test_loader = DataLoader(test_dataset, batch_size=64)
+        test_dataset = GraphWN_dataset(torch.from_numpy(x_test.transpose(0, 2, 1, 3)), torch.from_numpy(y_test.transpose(0, 2, 1, 3)))
+        test_loader = DataLoader(test_dataset, batch_size=128)
         test_loss = 0.0
         with no_grad():
             for i, data in enumerate(test_loader):
@@ -140,7 +161,7 @@ class GraphWN_predictor(object):
         print(f'test average loss {test_loss / i}.')
 
     def make_model(self):
-        model = GraphW_net(N=self.nodes, adj_matrix=self.adj_matrix, in_dim=self.in_dim, out_dim=self.out_dim).float()
+        model = GraphW_net(N=self.nodes, adj_matrix=self.adj_matrix, in_dim=self.in_dim, out_dim=self.out_dim, device=self.DEVICE).to(self.DEVICE).float()
         return model
 
     def load_model(self):
@@ -212,8 +233,9 @@ class GraphW_net(nn.Module):
         self.blocks = 4
         self.kernel = 2
         self.layers = 2
+        self.device = device
         # Fix base
-        self.support = [torch.tensor(i).to(device) for i in [asym_adj(adj_matrix), asym_adj(np.transpose(adj_matrix))]]
+        self.support = [torch.tensor(i).to(self.device) for i in [asym_adj(adj_matrix), asym_adj(np.transpose(adj_matrix))]]
 
      
         self.residual_channels = channels
@@ -232,9 +254,8 @@ class GraphW_net(nn.Module):
         self.start_conv = nn.Conv2d(in_channels=in_dim, out_channels=self.residual_channels, kernel_size=(1,1))
 
         receptive_field = 1
-        self.nodevec1 = nn.Parameter(torch.randn(N, 10).to(device), requires_grad=True).to(device)
-        self.nodevec2 = nn.Parameter(torch.randn(10, N).to(device), requires_grad=True).to(device)
-
+        self.nodevec1 = nn.Parameter(torch.randn(N, 10), requires_grad=True).to(self.device)
+        self.nodevec2 = nn.Parameter(torch.randn(10, N), requires_grad=True).to(self.device)
         for _ in range(self.blocks):
             additional_scope = self.kernel - 1
             new_dilation = 1

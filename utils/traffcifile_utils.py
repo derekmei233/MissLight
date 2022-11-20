@@ -1,7 +1,7 @@
 import random
 import json
 from utils.agent_preparation import create_world
-from utils.preparation import create_relation
+from utils.preparation import build_relation
 
 
 def augment_traffic(path, seed, max_interval, interval):
@@ -34,3 +34,17 @@ def flow_heapmap(file):
         roads = inter.in_roads
         for r in roads:
             reverse_mapping.update({r['id']: inter.id})
+    count = dict()
+    for inter in world.intersections:
+        count.update({inter.id: 0})
+    for tmp in contents:
+        route = tmp['route']
+        for r in route:
+            if reverse_mapping.get(r) is None:
+                pass
+            else:
+                count[reverse_mapping[r]] += 1
+    idx_count = dict()
+    for idx, inter in enumerate(world.intersections):
+        idx_count.update({idx: count[inter.id]})
+    return count, idx_count

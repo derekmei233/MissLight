@@ -266,17 +266,17 @@ def normalization(train, val, test):
     print('mean.shape:', mean.shape)
     print('std.shape:', std.shape)
 
-    def normalize(x):
-        noramlized_x = np.nan_to_num((x[:,:,0:3,:] - mean) / std)
-        x[:,:,0:3,:] = noramlized_x
-        return x
-        # return (x - mean) / std
 
-    train_norm = normalize(train)
-    val_norm = normalize(val)
-    test_norm = normalize(test)
+    train_norm = normalize(train, mean, std)
+    val_norm = normalize(val, mean, std)
+    test_norm = normalize(test, mean, std)
 
     return {'_mean': mean, '_std': std}, train_norm, val_norm, test_norm
+
+def normalize(x, mean, std):
+    noramlized_x = np.nan_to_num((x[:,:,0:3,:] - mean) / std)
+    x[:,:,0:3,:] = noramlized_x
+    return x
 
 
 def inter2edge_slice(relation, states, phases, mask_pos):

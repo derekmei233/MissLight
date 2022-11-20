@@ -28,6 +28,7 @@ def create_fixedtime_agents(world, time=30):
             [
             LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None), 
             IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+            LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
             ],
             LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
             i.id, idx, time=time
@@ -48,6 +49,7 @@ def create_preparation_agents(world, mask_pos,time,agent, device):
                 [
                     LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
                     IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                    LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
                 ],
                 LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 i.id, idx, device
@@ -58,6 +60,7 @@ def create_preparation_agents(world, mask_pos,time,agent, device):
                 [
                 LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None), 
                 IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
                 ],
                 LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 i.id, idx,time=time
@@ -73,6 +76,7 @@ def create_maxp_agents(world):
             [
                 LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
                 IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
             ],
             LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
             i.id, idx
@@ -121,6 +125,7 @@ def create_app1maxp_agents(world, mask_pos,agent, device):
                 [
                     LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
                     IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                    LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
                 ],
                 LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 i.id, idx, device
@@ -131,6 +136,7 @@ def create_app1maxp_agents(world, mask_pos,agent, device):
                 [
                 LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None), 
                 IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
                 ],
                 LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
                 i.id, idx
@@ -151,6 +157,7 @@ def create_independent_agents(world, agent, device):
             [
                 LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
                 IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
             ],
             LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
             i.id, idx, device
@@ -172,7 +179,8 @@ def create_shared_agents(world, mask_pos,agent, device):
         ob_generator.append(
             [
                 LaneVehicleGenerator(world, inter, ['lane_count'], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False)
+                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False),
+                LaneVehicleGenerator(world, inter, ["lane_delay"], in_only=True, average=None)
             ])
         reward_generator.append(LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average=None, negative=True))
         iid.append(inter.id)
@@ -204,7 +212,8 @@ def create_model_based_agents(world, mask_pos, device,agent):
         ob_generator.append(
             [
                 LaneVehicleGenerator(world, inter, ['lane_count'], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False)
+                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False),
+                LaneVehicleGenerator(world, inter, ["lane_delay"], in_only=True, average=None)
             ])
         reward_generator.append(LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average=None, negative=True))
         iid.append(inter.id)

@@ -57,8 +57,8 @@ class IDQNAgent(RLAgent):
         self.batch_size = 64
 
         self.criterion = nn.MSELoss()
-        self.model = self._build_model()
-        self.target_model = self._build_model()
+        self.model = self._build_model().to(self.device)
+        self.target_model = self._build_model().to(self.device)
         self.optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False, eps=1e-7)
         self.update_target_network()
 
@@ -72,10 +72,13 @@ class IDQNAgent(RLAgent):
         ob_oh = one_hot(phase[self.idx], self.action_space.n)
         obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float().to(self.device)
         act_values = self.model.forward(obs, train=False)
-        return torch.argmax(act_values)
+        return torch.argmax(act_values).clone().numpy()
 
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
+
+    def get_delay(self):
+        return np.mean(self.ob_generator[2].generate())
 
     def sample(self):
         return self.action_space.sample()

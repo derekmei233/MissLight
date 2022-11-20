@@ -43,7 +43,7 @@ class MSEMetric(BaseMetric):
     def update(self):
         # should be [N_intersection, N_features]
         assert len(self.buffer) != 0, 'no record inside buffer'
-        epo_avg = sum(self.buffer) / len(self.buffer)
+        epo_avg =sum(self.buffer) / len(self.buffer)
         self.record.append(epo_avg)
         self.buffer = list()
 
@@ -52,7 +52,7 @@ class MSEMetric(BaseMetric):
         self.record = list()
     
     def get_cur_result(self):
-        return sum(self.buffer) / len(self.buffer)
+        return np.sqrt(sum(self.buffer)) / len(self.buffer)
 
     def get_result(self):
         return sum(self.record) / len(self.record)

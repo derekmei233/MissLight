@@ -32,6 +32,9 @@ class FixedTimeAgent(BaseAgent):
     
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
+
+    def get_delay(self):
+        return np.mean(self.ob_generator[2].generate())
     
     def get_reward(self):
         '''take position at np.mean()'''

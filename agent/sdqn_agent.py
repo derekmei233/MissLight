@@ -98,6 +98,10 @@ class SDQNAgent(RLAgent):
          for i in range(self.sub_agents))
         return obs
 
+    def get_delay(self):
+        obs = np.array(list([np.mean(self.ob_generator[i][2].generate())] for i in range(self.sub_agents))).squeeze()
+        return obs
+
     def sample(self):
         return [self.action_space.sample() for _ in range(self.sub_agents)]
 
