@@ -20,7 +20,7 @@ from environment import TSCEnv
 
 class SDQN(nn.Module):
     def __init__(self, size_in, size_out):
-        super(IDQN, self).__init__()
+        super(SDQN, self).__init__()
         self.dense_1 = nn.Linear(size_in, 20)
         self.dense_2 = nn.Linear(20, 20)
         self.dense_3 = nn.Linear(20, size_out)
@@ -66,6 +66,7 @@ class SDQNAgent(RLAgent):
 
         self.learnable = len(self.idx)
         self.memory = [deque(maxlen=10000) for i in range(self.learnable)] # number of samples 
+        self.memory_with_history = deque(maxlen=10000)
 
         self.learning_start = 2000
         self.update_model_freq = 1
@@ -124,6 +125,9 @@ class SDQNAgent(RLAgent):
     def remember(self, ob, action, reward, next_ob , idx):
         self.memory[self.idx.index(idx)].append((ob, action, reward, next_ob))
 
+    def remember_traj(self, last_recovered, last_phases, actions, cur_phases, ob_traj):
+        self.memory_with_history.append((last_recovered, last_phases, actions, cur_phases, ob_traj))
+
     def _encode_sample(self, minibatch):
         # TODO: check dimension
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
@@ -140,10 +144,14 @@ class SDQNAgent(RLAgent):
         rewards = torch.from_numpy(rewards).float().to(self.device)
         next_obs = torch.from_numpy(next_obs).float().to(self.device)
         return obs, actions_t, rewards, next_obs
+    
+    def _encode_traj_sample(self, minibatch):
+        last_recovered, last_phases, actions, cur_phases, ob_traj = list(zip(*minibatch))
+        return last_recovered, last_phases, actions, cur_phases, ob_traj
+
 
     def replay(self):
         # sample from all buffers
-
         minibatch = self._sample(self.batch_size)
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         out = self.target_model.forward(next_obs, train=False)
@@ -162,7 +170,7 @@ class SDQNAgent(RLAgent):
         if update_times == 0:
             return 
         minibatch = self._sample(update_times)
-        obs, actions, rewards, next_obs = self._encode_sample(minibatch)
+        obs, actions, _, next_obs = self._encode_sample(minibatch)
         if infer == 'NN_st':
             x = obs
         elif infer == 'NN_sta':
@@ -179,7 +187,35 @@ class SDQNAgent(RLAgent):
         loss = self.criterion(self.model.forward(obs, train=True), target_f)
         self.optimizer.zero_grad()
         loss.backward()
-        self.optimizer.step()        
+        self.optimizer.step()
+
+    def replay_img_v2(self, reward_model, state_model, update_times, relation, mask_pos):
+        # remember traj buffer
+        if update_times == 0:
+            return 
+            # use phases or take new actions
+        minibatch = self._sample_with_history(update_times)
+        batch_last_states, batch_last_phases, batch_actions, batch_cur_phases, batch_ob_traj = self._encode_traj_sample(minibatch)
+        for i in range(update_times):
+            last_states = torch.from_numpy(batch_last_states[i])
+            last_phases = torch.from_numpy(one_hot(batch_last_phases[i], self.action_space.n))
+            actions = batch_actions[i]
+            cur_phases = torch.from_numpy(one_hot(batch_cur_phases[i], self.action_space.n))
+            ob_traj = batch_ob_traj[i]
+            obs = torch.cat((last_states, last_phases), axis=1).float().to('cpu')
+            rewards = torch.squeeze(reward_model.predict(obs), dim=1).to('cpu')
+            next_states = state_model.pred(last_states, ob_traj, relation, mask_pos)
+            next_obs = torch.cat((next_states, cur_phases), axis=1).float().to('cpu')
+            out = self.target_model.forward(next_obs, train=False)
+            target = rewards + self.gamma * torch.max(out, dim=1)[0]
+            target_f = self.model.forward(obs, train=False)
+            for i, action in enumerate(actions):
+                target_f[i][action] = target[i]
+            loss = self.criterion(self.model.forward(obs, train=True), target_f)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
 
     def get_latest_sample(self, infer='NN_st'):
         sample = []
@@ -200,6 +236,11 @@ class SDQNAgent(RLAgent):
         for i in range(self.learnable):
             mini_batch.extend(random.sample(self.memory[i], batch_size))
         random.shuffle(mini_batch)
+        return mini_batch
+
+    def _sample_with_history(self, batch_size):
+        mini_batch = []
+        mini_batch.extend(random.sample(self.memory_with_history, batch_size))
         return mini_batch
 
     def load_model(self, model_dir):

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import torch.optim as optim 
 from pathlib import Path
-from utils.preparation import inter2edge_slice, mask_op, reconstruct_data_slice, one_hot, normalize
+from utils.preparation import inter2edge_slice, mask_op_with_truth, reconstruct_data_slice
 import time
 from tqdm import tqdm
 # implementation based on https://github.com/nnzhan/Graph-WaveNet with some modification
@@ -34,6 +34,7 @@ def masked_mae(preds, labels, mask):
 class GraphWN_predictor(object):
     def __init__(self, N, node_update, adj_matrix, stats, in_dim, out_dim, DEVICE, model_dir):
         super(GraphWN_predictor, self).__init__()
+        # 1 for unmasked 2 for masked
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.nodes = N
@@ -72,15 +73,16 @@ class GraphWN_predictor(object):
         x = self.scale(torch.from_numpy(buffer.get().transpose(0,2,1,3)).float().to(self.DEVICE))
         result = states.copy()
         y_true_numpy = inter2edge_slice(relation, result, phases, mask_pos)
-        y_true = torch.from_numpy(y_true_numpy).float().to(self.DEVICE)
+        y_eval = inter2edge_slice(relation, result, phases, []).T[np.newaxis,:3,:,np.newaxis]
+        y_eval = torch.from_numpy(y_eval).float().to(self.DEVICE)
         with no_grad():
             h = self.model(x)
             edge_feature = self.inverse_scale(h)
             # prediction value used later in GraphWN
-            loss = self.criterion(edge_feature, y_true, self.mask)
+            loss = self.criterion(edge_feature, y_eval, self.eval_mask)
         impute = edge_feature.to("cpu").numpy().transpose(0,2,1,3).squeeze().squeeze()
         prediction = reconstruct_data_slice(impute, None, relation) # current state
-        infer = mask_op(y_true_numpy, mask_matrix, adj_matrix, mode)
+        infer = mask_op_with_truth(y_true_numpy, mask_matrix, adj_matrix, mode)
 
         infer[:, :3] = impute * self.impute_mask + infer[:, :3] * self.reserve_mask
         new_buffer = infer
@@ -90,9 +92,34 @@ class GraphWN_predictor(object):
             result[i, :] = prediction[i, :]
         return result, loss
 
-    def train_while_control(self, x, target):
-        pass
+    def pred(self, states, traj, relation, mask_pos):
+        self.model.eval()
+        x = self.scale(torch.from_numpy(traj.transpose(0,2,1,3)).float().to(self.DEVICE))
+        result = states
+        with no_grad():
+            h = self.model(x)
+            edge_feature = self.inverse_scale(h)
+            # prediction value used later in GraphWN
+        impute = edge_feature.to("cpu").numpy().transpose(0,2,1,3).squeeze().squeeze()
+        prediction = torch.from_numpy(reconstruct_data_slice(impute, None, relation)) # current state
+        for i in mask_pos:
+            # mask with inference value        
+            result[i, :] = prediction[i, :]
+        return result
 
+
+    def train_while_control(self, buffer, states, phases, relation, mask_pos):
+        self.model.train()
+        self.optimizer.zero_grad()
+        x = self.scale(torch.from_numpy(buffer.get(-1).transpose(0,2,1,3)).float().to(self.DEVICE))
+        result = states.copy()
+        y_true_numpy = inter2edge_slice(relation, result, phases, mask_pos).T[np.newaxis,:3,:,np.newaxis]
+        y_eval = torch.from_numpy(y_true_numpy).float().to(self.DEVICE)
+        h = self.model(x)
+        edge_feature = self.inverse_scale(h)
+        loss = self.criterion(edge_feature, y_eval, self.mask)
+        loss.backward()
+        self.optimizer.step()
 
     def train(self, x_train, y_train, x_val, y_val, epochs):
         self.model.train()
@@ -169,7 +196,6 @@ class GraphWN_predictor(object):
         model_name = Path.joinpath(self.model_dir, name)
         self.model = self.make_model()
         self.model.load_state_dict(torch.load(model_name))
-
 
     def save_model(self):
         if not Path.exists(self.model_dir): 
@@ -316,4 +342,3 @@ class GraphW_net(nn.Module):
         x = F.relu(self.end_conv_1(x))
         x = self.end_conv_2(x)
         return x
-

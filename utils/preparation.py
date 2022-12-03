@@ -160,6 +160,49 @@ def normalization(train, val, test):
 
 
 
+def mask_op_with_truth(data, mask_matrix, adj_matrix, data_construct):
+    '''
+    :param data:(N,F)
+    :param mask_matrix:(N,)
+    :param adj_matrix:(N,N)
+    :param data_construct:select or random
+    :return:(N,F): inference value( 0 at observable position)
+    '''
+    # avoid inplace replacement
+    # data_or = -1 * np.ones_like(data, dtype=np.float32) for debug use only
+    data_or = data.copy()
+    if data_construct == 'select':
+        for mask_id, value in enumerate(mask_matrix):
+            if value != 1:
+                neighbors = []
+                for col_id, x in enumerate(adj_matrix[:, mask_id]):
+                    if x == 1:
+                        neighbors.append(col_id)
+                neighbor_all = np.zeros_like(data[0, :3])
+                if len(neighbors) != 0:
+                    for node in neighbors:
+                        neighbor_all = data[node, :3] + neighbor_all
+                    data_or[mask_id, :3] = neighbor_all / len(neighbors)
+                else:
+                    rand_id = random.randint(0, len(mask_matrix)-1)
+                    while mask_matrix[rand_id] != 1:
+                        rand_id = random.randint(0, len(mask_matrix)-1)
+                    data_or[mask_id, :3] = data[rand_id, :3]
+                if value == 0:
+                    # set virtual node's phase
+                    rand_id = random.sample(neighbors, 1)[0]
+                    data_or[mask_id, 3:] = data[rand_id, 3:]
+    else:
+        for mask_id, value in enumerate(mask_matrix):
+            if value != 1:
+                rand_id = random.randint(0, len(mask_matrix)-1)
+                while mask_matrix[rand_id] != 1:
+                    rand_id = random.randint(0, len(mask_matrix)-1)
+                data_or[mask_id, :3] = data[rand_id, :3]
+                if value == 0:
+                    data_or[mask_id, 3:] = data[rand_id, 3:]
+    return data_or
+
 def mask_op(data, mask_matrix, adj_matrix, data_construct):
     '''
     :param data:(N,F)

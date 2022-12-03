@@ -37,6 +37,7 @@ class NN_predictor(object):
         self.model_dir = model_dir
 
     def predict(self, x):
+        x = x.to(self.DEVICE)
         with no_grad():
             result = self.model.forward(x)
         return result
@@ -83,8 +84,8 @@ class NN_predictor(object):
             x_train, y_true = x[idx,:], target[idx,:]
             
             self.online_optimizer.zero_grad()
-            x_train.to(self.DEVICE)
-            y_true.to(self.DEVICE)
+            x_train = x_train.to(self.DEVICE)
+            y_true = y_true.to(self.DEVICE)
             y_pred = self.model(x_train)
             loss = self.criterion(y_pred, y_true)
             loss.backward()
@@ -98,7 +99,7 @@ class NN_predictor(object):
         model_name = os.path.join(self.model_dir, name)
         self.model = N_net(self.in_dim, self.out_dim)
         self.model.load_state_dict(torch.load(model_name))
-        self.model = self.model.float()
+        self.model = self.model.float().to(self.DEVICE)
 
 
     def save_model(self):

@@ -32,12 +32,15 @@ class SFM_predictor(object):
         self.name = self.__class__.__name__
 
     def predict(self, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select'):
-        masked = inter2edge_slice(relation, states, phases, mask_pos)
-        infer = mask_op(masked, mask_matrix, adj_matrix, mode)
-        #edge_feature = infer * masked * -1 for debug use only
-        edge_feature = infer + masked
+        y_eval = inter2edge_slice(relation, states, phases, [])
+        y_true_numpy = inter2edge_slice(relation, states, phases, mask_pos)
+
+        infer = mask_op(y_true_numpy, mask_matrix, adj_matrix, mode)
+        #edge_feature = infer * y_true_numpy * -1 for debug use only
+        edge_feature = infer + y_true_numpy
         prediction = reconstruct_data_slice(edge_feature, phases, relation)
-        return prediction
+        loss = self.criterion(edge_feature.T[np.newaxis,0:3,:,np.newaxis], y_eval.T[np.newaxis,0:3,:,np.newaxis], self.eval_mask)
+        return prediction, loss
 
     def make_model(self, **kwargs):
         return self
