@@ -4,6 +4,7 @@ import random
 import json
 import re
 from world import World
+from collections import defaultdict
 
 
 def fork_config(load_file, save_dir):
@@ -22,11 +23,51 @@ def fork_config(load_file, save_dir):
     return save_file
 
 def one_hot(phase, num_class):
+    if num_class == 0:
+        return np.array([0])
     assert num_class > phase.max()
     one_hot = np.zeros((len(phase), num_class))
     one_hot[range(0, len(phase)), phase.squeeze()] = 1
     # one_hot = one_hot.reshape(*phase.shape, num_class)
-    return one_hot.squeeze()
+    return one_hot.squeeze(0)
+
+def generate_phase_connectivity(agents):
+    generators = [ag.ob_generator[0] for ag in agents]
+    feature2lane = []
+    for g in generators:
+        for lane in g.lanes:
+            for l in lane:
+                feature2lane.append(l)
+    n_lanes = len(feature2lane)
+    phased_connection = {g.I.id: {} for g in generators}
+    for g in generators:
+        inter_phase_links = g.I.phase_available_lanelinks
+        for p in g.I.phases:
+            normalizer = defaultdict(int)
+            lanelinks = np.zeros((n_lanes, n_lanes))
+            for lk in inter_phase_links[p - 1]:
+                # normalize all connection of one lane
+                start = lk[0]
+                end = lk[1]
+                normalizer[start] += 1
+                try:
+                    row = feature2lane.index(start)
+                    col = feature2lane.index(end)
+                except ValueError:
+                    continue
+                lanelinks[row][col] = 1
+            for n,d in normalizer.items():
+                row = feature2lane.index(n)
+                lanelinks[row,:] /= d
+            phased_connection[g.I.id].update({p: lanelinks})
+    return n_lanes, phased_connection
+
+def get_phase_connectivity(conn, n_lanes, generator, actions):
+    result = np.zeros((n_lanes, n_lanes))
+    for idx, a in enumerate(actions):
+        result += conn[generator[idx].I.id][a+1]
+    return result
+
 
 def build_relation(world):
     '''

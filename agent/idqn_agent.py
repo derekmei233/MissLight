@@ -45,7 +45,7 @@ class IDQNAgent(RLAgent):
         self.idx = idx
         self.name = self.__class__.__name__
         self.device = device
-
+        
         self.ob_generator = ob_generator
         ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)

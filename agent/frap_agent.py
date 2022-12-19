@@ -271,7 +271,7 @@ class FRAP(nn.Module):
             #states.resize_(1,12)
         #print(states)
         # if lane_num=12,then num_movements=12, but turning right do not be used
-        num_movements = int((states.size()[1] - 1) / self.demand_shape) if not self.one_hot else int(
+        num_movements = int((states.size()[1] - 1) / self.demand_shape)  if not self.one_hot else int(
             (states.size()[1] - len(self.phase_pairs)) / self.demand_shape)
         batch_size = states.size()[0]
         acts = states[:, :1].to(torch.int64) if not self.one_hot else states[:, :len(self.phase_pairs)].to(torch.int64)

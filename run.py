@@ -33,15 +33,15 @@ else:
 # TODO: test on different reward impute(t or pt) first
 # TODO: var = [Imputation/Agent/Control/prefix]
 parser = argparse.ArgumentParser(description='IDQN - FixedTime generate dataset for reward inference model')
-parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
+parser.add_argument('--config', type=str, default='ny16x3', help='network working on')
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
-parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
+parser.add_argument('--fix_time', type=int, default=60, help='how often fixtime agent change phase')
 parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
 parser.add_argument('-impute', default='gwn', choices=['sfm', 'gwn'])
 parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'])
-parser.add_argument('-control', default='S-S-O-model_based', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
+parser.add_argument('-control', default='F-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
 parser.add_argument('--prefix', default='test', type=str)
 
 parser.add_argument('--debug', action='store_true')
