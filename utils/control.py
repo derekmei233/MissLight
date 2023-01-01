@@ -3,7 +3,7 @@ from predictionModel.SFM import SFM_predictor
 from metric.maskMetric import MSEMetric
 
 from utils.preparation import one_hot
-from utils.data_generation import store_reshaped_data, time_helper
+from utils.data_generation import store_reshaped_data, store_reshaped_data_hetero, time_helper
 
 import os
 from pathlib import Path
@@ -15,7 +15,7 @@ import torch
 # protocol: last_obs is returned from env, (last_stats, last_phases) is returned from imputation
 
 # F-F
-def fixedtime_execute(logger, env, agents, action_interval, relation):
+def fixedtime_execute(logger, env, agents, action_interval):
     env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
     save_dir = name[name.index('output_data'): name.index('logging')]
@@ -33,7 +33,7 @@ def fixedtime_execute(logger, env, agents, action_interval, relation):
             actions = []
             delays = []
             for ag in agents:
-                action = ag.get_action(states, phases, relation)
+                action = ag.get_action(states, phases)
                 delay = ag.get_delay()
                 actions.append(action)
                 delays.append(delay)
@@ -179,6 +179,132 @@ def naive_execute(logger, env, agents, e, best_att, information, state_raw_data,
             last_phases = np.array(last_phases, dtype=np.int8)
     store_reshaped_data(information, [last_observable, rewards_observable, actions_observable, observable])
     state_raw_data.append(save_state)
+    att = env.eng.get_average_travel_time()
+    if att < best_att:
+        best_att = att
+    logger.info("episode:{}, Test:{}".format(e, att))
+    logger.info(f'delay: {np.array(delay_list) / count}')
+    return best_att
+
+def naive_train_hetero(logger, env, agents, episodes, action_interval, save_rate):
+    # take in environment and generate data for inference net
+    # save t, phase_t, rewards_tp, state_tp, phase_tp(action_t) into dictionary
+    logger.info(" Independent FRAP_move -  FixedTime control")
+    information = []
+    total_decision_num = 0
+    best_att = np.inf
+    for e in tqdm(range(episodes)):
+        # collect [state_t, phase_t, reward_t, state_tp, phase_tp(action_t)] pair at observable intersections
+        last_obs = env.reset()
+        last_states,last_phases = list(zip(*last_obs))
+
+        last_states = np.array(last_states, dtype=np.float32)
+        last_phases = np.array(last_phases, dtype=np.int8)
+        episodes_rewards = [0 for _ in agents]
+        episodes_decision_num = 0
+        last_observable = []
+        movement_observable = []
+        rewards_observable = []
+        i = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                actions = []
+                for agent_id, agent in enumerate(agents):
+                    if total_decision_num > agent.learning_start:
+                        actions.append(agent.choose(last_states[agent_id], last_phases[agent_id])) # okay, since idqn only apply to observable intersections
+                    else:
+                        actions.append(agent.sample())
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, _, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards_train = np.mean(rewards_list, axis=0)
+                rewards = rewards_train
+                cur_states, cur_phases = list(zip(*obs))
+                cur_states = np.array(cur_states, dtype=np.float32)
+                cur_phases = np.array(cur_phases, dtype=np.int8)
+
+                for agent_id, agent in enumerate(agents):
+                    if agent.name == 'FixedTimeAgent':
+                        pass
+                    else:
+                        # no imputation, use obs directly
+                        agent.remember(last_obs[agent_id], actions[agent_id], rewards[agent_id], obs[agent_id]) # okay
+                        movement_observable.append(agent.get_movement(actions[agent_id]))
+                        episodes_rewards[agent_id] += rewards[agent_id]
+                        episodes_decision_num += 1
+                        last_observable.append(last_states[agent_id])
+                        rewards_observable.append(rewards_train[agent_id])
+                total_decision_num += 1
+                last_obs = obs
+                last_states, last_phases = cur_states, cur_phases
+
+            for agent_id, agent in enumerate(agents):
+                if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
+                    agent.replay()
+                if total_decision_num > agent.learning_start and total_decision_num % agent.update_target_model_freq == agent.update_target_model_freq - 1:
+                    agent.update_target_network()
+        store_reshaped_data_hetero(information, [last_observable, movement_observable, rewards_observable])
+        logger.info("episodes:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        best_att = naive_execute_hetero(logger, env, agents, e, best_att, information, action_interval, save_rate)
+    logger.info(f'naive average travel time result: {best_att}')
+    logger.info('-' * 50)
+    return information
+
+def naive_execute_hetero(logger, env, agents, e, best_att, information, action_interval, save_rate):
+    if e % save_rate == save_rate - 1:
+        env.eng.set_save_replay(True)
+        name = logger.handlers[0].baseFilename
+        save_dir = Path(name[name.index('output_data'): name.index('logging')])
+        tmp = os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e)
+        env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e))
+    else:
+        env.eng.set_save_replay(False)
+    i = 0
+    last_obs = env.reset()
+    last_states, last_phases = list(zip(*last_obs))
+    last_states = np.array(last_states, dtype=np.float32)
+    last_phases = np.array(last_phases, dtype=np.int8)
+
+    episodes_rewards = [0 for _ in agents]
+    last_observable = []
+    rewards_observable = []
+    movement_observable = []
+    delay_list = np.zeros([1, len(agents)])
+    count = 0
+    while i < 3600:
+        if i % action_interval == 0:
+            actions = []
+            delays = []
+            for agent_id, agent in enumerate(agents):
+                actions.append(agent.get_action(last_states[agent_id], last_phases[agent_id]))
+                delays.append(agent.get_delay())
+            delay_list += np.array(delays)
+            count += 1
+            rewards_list = []
+
+
+            for _ in range(action_interval):
+                obs, rewards, _, _ = env.step(actions)
+                i += 1
+                rewards_list.append(rewards)
+            rewards_train = np.mean(rewards_list, axis=0)
+            rewards =  rewards_train
+            for agent_id, agent in enumerate(agents):
+                if agent.name == 'FixedTimeAgent':
+                    pass
+                else:
+                    episodes_rewards[agent_id] += rewards[agent_id]
+                    last_observable.append(last_states[agent_id])
+                    movement_observable.append(agent.get_movement(actions[agent_id]))
+                    # S_{t+1}-> R_t
+                    rewards_observable.append(rewards_train[agent_id])
+            last_obs = obs
+            last_states, last_phases = list(zip(*last_obs))
+            last_states = np.array(last_states, dtype=np.float32)
+            last_phases = np.array(last_phases, dtype=np.int8)
+    store_reshaped_data_hetero(information, [last_observable, movement_observable, rewards_observable])
     att = env.eng.get_average_travel_time()
     if att < best_att:
         best_att = att
@@ -347,6 +473,74 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     logger.info(f'delay: {np.array(delay_list) / count}')
     return best_att
+
+# I-M 
+def app1maxp_train_hetero(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
+    logger.info("Independent FRAP_move - Max Pressure control")
+    total_decision_num = 0
+    best_att = np.inf
+    record = MSEMetric('state mse', mask_pos)
+    for e in range(episode):
+        # collect [state_t, phase_t, reward_t, state_tp, phase_tp(action_t)] pair at observable intersections
+        last_obs = env.reset()
+        last_states, last_phases = list(zip(*last_obs))
+        last_states = np.array(last_states, dtype=np.float32)
+        last_phases = np.array(last_phases, dtype=np.int8)
+        last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+        record.add(last_states, last_recovered)
+        episodes_rewards = [0 for _ in agents]
+        i = 0
+        episodes_decision_num = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                # TODO: implement other State inference model later
+                # SFM inference states
+                actions = []
+                for agent_id, agent in enumerate(agents):
+                    if agent.name == 'MaxPressureAgent':
+                        action = agent.get_action(last_recovered, last_phases, relation)
+                        actions.append(action)
+                    else:
+                        if total_decision_num > agent.learning_start:
+                            actions.append(agent.choose(last_recovered, last_phases, relation))
+                        else:
+                            actions.append(agent.sample())
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, _, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards = np.mean(rewards_list, axis=0)
+                rewards = np.mean(rewards, axis=1)
+                for agent_id, agent in enumerate(agents):
+                    if agent.name == 'MaxPressureAgent':
+                        pass
+                    else:
+                        agent.remember(last_obs[agent_id], actions[agent_id], rewards[agent_id], obs[agent_id]) # no need to change obs
+                        episodes_rewards[agent_id] += rewards[agent_id]
+                        episodes_decision_num += 1
+                total_decision_num += 1
+                last_obs = obs
+                last_states, last_phases = list(zip(*last_obs))
+                last_states = np.array(last_states, dtype=np.float32)
+                last_phases = np.array(last_phases, dtype=np.int32)
+                last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            for agent_id, agent in enumerate(agents):
+                if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
+                    agent.replay()
+                if total_decision_num > agent.learning_start and total_decision_num % agent.update_target_model_freq == agent.update_target_model_freq - 1:
+                    agent.update_target_network()
+        cur_mse = record.get_cur_result()
+        record.update()
+        logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
+        best_att = app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
+    avg_mse = record.get_result()
+
+    logger.info(f'approach 1: maxpressure average travel time result: {best_att}')
+    logger.info(f'final mse is: {avg_mse}')
+    logger.info('-' * 50)
+    return record
 
 # S-S-O
 def app1_trans_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate,agent_name):

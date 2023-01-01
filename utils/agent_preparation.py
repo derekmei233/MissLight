@@ -28,9 +28,9 @@ def create_fixedtime_agents(world, time=30):
             [
             LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None), 
             IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
-            LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
+            LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average='all')
             ],
-            LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+            LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average='all', negative=True),
             i.id, idx, time=time
         ))
     return agents
@@ -63,6 +63,35 @@ def create_preparation_agents(world, mask_pos,time,agent, device):
                 LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
                 ],
                 LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+                i.id, idx,time=time
+            ))
+    return agents
+
+def create_preparation_agents_hetero(world, mask_pos,time, device):
+    agents = []
+    New_Agent=FRAP_DQNAgent
+    for idx, i in enumerate(world.intersections):
+        action_space = gym.spaces.Discrete(len(i.phases))
+        if idx not in mask_pos:
+            agents.append(New_Agent(
+                action_space,
+                [
+                    LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
+                    IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                    LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average='all')
+                ],
+                LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average='all', negative=True),
+                i.id, idx, device
+            ))
+        else:
+            agents.append(FixedTimeAgent(
+                action_space, 
+                [
+                LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None), 
+                IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average='all')
+                ],
+                LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average='all', negative=True),
                 i.id, idx,time=time
             ))
     return agents
@@ -142,7 +171,36 @@ def create_app1maxp_agents(world, mask_pos,agent, device):
                 i.id, idx
             ))
     return agents
-    
+
+def create_app1maxp_agents_hetero(world, mask_pos, device):
+    agents = []
+    New_Agent=FRAP_DQNAgent
+    for idx, i in enumerate(world.intersections):
+        action_space = gym.spaces.Discrete(len(i.phases))
+        if idx not in mask_pos:
+            agents.append(New_Agent(
+                action_space,
+                [
+                    LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
+                    IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                    LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
+                ],
+                LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+                i.id, idx, device
+            ))
+        else:
+            agents.append(MaxPressureAgent(
+                action_space, 
+                [
+                LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None), 
+                IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
+                LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
+                ],
+                LaneVehicleGenerator( world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+                i.id, idx
+            ))
+    return agents
+
 def create_independent_agents(world, agent, device):
     agents = []
     New_Agent=None

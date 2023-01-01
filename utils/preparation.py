@@ -5,6 +5,7 @@ import json
 import re
 from world import World
 from collections import defaultdict
+from copy import deepcopy
 
 
 def fork_config(load_file, save_dir):
@@ -31,43 +32,161 @@ def one_hot(phase, num_class):
     # one_hot = one_hot.reshape(*phase.shape, num_class)
     return one_hot.squeeze(0)
 
-def generate_phase_connectivity(agents):
-    generators = [ag.ob_generator[0] for ag in agents]
-    feature2lane = []
-    for g in generators:
-        for lane in g.lanes:
-            for l in lane:
-                feature2lane.append(l)
-    n_lanes = len(feature2lane)
-    phased_connection = {g.I.id: {} for g in generators}
-    for g in generators:
-        inter_phase_links = g.I.phase_available_lanelinks
-        for p in g.I.phases:
-            normalizer = defaultdict(int)
-            lanelinks = np.zeros((n_lanes, n_lanes))
-            for lk in inter_phase_links[p - 1]:
-                # normalize all connection of one lane
-                start = lk[0]
-                end = lk[1]
-                normalizer[start] += 1
-                try:
-                    row = feature2lane.index(start)
-                    col = feature2lane.index(end)
-                except ValueError:
-                    continue
-                lanelinks[row][col] = 1
-            for n,d in normalizer.items():
-                row = feature2lane.index(n)
-                lanelinks[row,:] /= d
-            phased_connection[g.I.id].update({p: lanelinks})
-    return n_lanes, phased_connection
 
-def get_phase_connectivity(conn, n_lanes, generator, actions):
-    result = np.zeros((n_lanes, n_lanes))
-    for idx, a in enumerate(actions):
-        result += conn[generator[idx].I.id][a+1]
-    return result
+class state_lane_convertor(object):
+    def __init__(self, agents, mask_pos):
+        super(state_lane_convertor, self).__init__()
+        self.ags = agents
+        self.shared = 1 if type(self.ags[0].ob_generator[0]) == list else 0
+        if self.shared:
+            self.generators = [i[0] for i in self.ags[0].ob_generator]
+        else:
+            self.generators = [ag.ob_generator[0] for ag in self.ags]
+        self.mask_pos = mask_pos
+        self.n_lanes, self.phased_connection = self._generate_phase_connectivity()
+        self.lane_mask = self._generate_lane_mask()
+        self.states_index = self._lane2state()
+        self.unmask_num = self.n_lanes - len(np.where(self.lane_mask)[0])
 
+    def _generate_phase_connectivity(self):
+        generators = self.generators
+        feature2lane = []
+        for g in generators:
+            for lane in g.lanes:
+                for l in lane:
+                    feature2lane.append(l)
+        n_lanes = len(feature2lane)
+        phased_connection = {g.I.id: {} for g in generators}
+        for g in generators:
+
+            inter_phase_links = g.I.phase_available_lanelinks
+            for idx, p in enumerate(g.I.phases):
+                normalizer = defaultdict(int)
+                lanelinks = np.zeros((n_lanes, n_lanes))
+                for lk in inter_phase_links[idx]:
+                    # normalize all connection of one lane
+                    start = lk[0]
+                    end = lk[1]
+                    normalizer[start] += 1
+                    try:
+                        row = feature2lane.index(start)
+                        col = feature2lane.index(end)
+                    except ValueError:
+                        continue
+                    lanelinks[row][col] = 1
+                for n,d in normalizer.items():
+                    row = feature2lane.index(n)
+                    lanelinks[row,:] /= d
+                phased_connection[g.I.id].update({p: lanelinks})
+        return n_lanes, phased_connection   
+    
+    def get_phase_connectivity(self, actions):
+        generators = self.generators
+        result = np.zeros((self.n_lanes, self.n_lanes))
+        for idx, a in enumerate(actions):
+            result += self.phased_connection[generators[idx].I.id][a+1]
+        return result
+
+    def _generate_lane_mask(self):
+        generators = self.generators
+        feature2lane = []
+        for g in generators:
+            for lane in g.lanes:
+                for l in lane:
+                    feature2lane.append(l)
+        n_lanes = len(feature2lane)
+        lane_mask = np.zeros(n_lanes)
+        for i in self.mask_pos:
+            for r in generators[i].lanes:
+                for l in r:
+                    lane_mask[feature2lane.index(l)] = 1
+        return lane_mask
+    
+    def lane2state(self, lanes):
+        states = []
+        for idx in range(len(self.generators)):
+            state = lanes[self.states_index[idx][0]:self.states_index[idx][1]]
+            states.append(state)
+        return states
+    
+    def state2lane(self, states):
+        return np.concatenate(states, axis=0)
+
+    def _lane2state(self):
+        idx = []
+        start = 0
+        count = 0 
+        for g in self.generators:
+            lanes = g.lanes
+            for r in lanes:
+                for l in r:
+                    count += 1
+            end = count
+            idx.append([start, end])
+            start = end
+        return idx
+
+    def fill_zero_connectivity(self, connection, lane):
+        fill_lane = deepcopy(lane)
+        zero_conn = np.where(np.sum(connection, axis=0) == 0, 1, 0)
+        idx = np.where(zero_conn * self.lane_mask == 1)[0]
+        avg_lane = np.sum(lane) / self.unmask_num
+        fill_lane[idx] = avg_lane
+        return fill_lane
+
+
+# def generate_phase_connectivity(agents):
+#     generators = [ag.ob_generator[0] for ag in agents]
+#     feature2lane = []
+#     for g in generators:
+#         for lane in g.lanes:
+#             for l in lane:
+#                 feature2lane.append(l)
+#     n_lanes = len(feature2lane)
+#     phased_connection = {g.I.id: {} for g in generators}
+#     for g in generators:
+#         inter_phase_links = g.I.phase_available_lanelinks
+#         for p in g.I.phases:
+#             normalizer = defaultdict(int)
+#             lanelinks = np.zeros((n_lanes, n_lanes))
+#             for lk in inter_phase_links[p - 1]:
+#                 # normalize all connection of one lane
+#                 start = lk[0]
+#                 end = lk[1]
+#                 normalizer[start] += 1
+#                 try:
+#                     row = feature2lane.index(start)
+#                     col = feature2lane.index(end)
+#                 except ValueError:
+#                     continue
+#                 lanelinks[row][col] = 1
+#             for n,d in normalizer.items():
+#                 row = feature2lane.index(n)
+#                 lanelinks[row,:] /= d
+#             phased_connection[g.I.id].update({p: lanelinks})
+#     return n_lanes, phased_connection
+
+# def get_phase_connectivity(ags, conn, n_lanes, actions):
+#     generator = [ag.ob_generator[0] for ag in ags]
+#     result = np.zeros((n_lanes, n_lanes))
+#     for idx, a in enumerate(actions):
+#         result += conn[generator[idx].I.id][a+1]
+#     return result
+
+# def generate_lane_mask(ags, mask_pos):
+#     generators = [ag.ob_generator[0] for ag in ags]
+#     feature2lane = []
+#     for g in generators:
+#         for lane in g.lanes:
+#             for l in lane:
+#                 feature2lane.append(l)
+#     n_lanes = len(feature2lane)
+#     lane_mask = np.zeros(n_lanes)
+#     for i in mask_pos:
+#         for r in generators[i].lanes:
+#             for l in r:
+#                 lane_mask[feature2lane.index(l)] = 1
+#     return lane_mask
 
 def build_relation(world):
     '''

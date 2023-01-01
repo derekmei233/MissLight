@@ -27,9 +27,13 @@ class LaneVehicleGenerator(BaseGenerator):
             roads = I.in_roads
         else:
             roads = I.roads
+        self.directions = []
+        self.roads = []
         for road in roads:
             from_zero = (road["startIntersection"] == I.id) if self.world.RIGHT else (road["endIntersection"] == I.id)
             self.lanes.append([road["id"] + "_" + str(i) for i in range(len(road["lanes"]))[::(1 if from_zero else -1)]])
+            self.roads.extend(road['id'] for _ in range(len(road["lanes"])))
+            self.directions.extend(self.I._get_direction(road, False) for _ in range(len(road["lanes"])))
 
         # subscribe functions
         self.world.subscribe(fns)

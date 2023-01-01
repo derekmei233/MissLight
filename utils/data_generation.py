@@ -23,6 +23,17 @@ def store_reshaped_data(data, information):
         phase_tp = np.concatenate((phase_tp, information[3][i][1][np.newaxis, :]), axis = 0)
     data.append([state_t, phase_t, reward, action, state_tp, phase_tp])
 
+def store_reshaped_data_hetero(data, information):
+    # store information into [N_agents, N_features] formation
+    state_t = np.stack((information[0][0], information[0][1]))
+    movement = np.stack((information[1][0], information[1][1]))
+    reward = np.stack((information[2][0], information[2][1]))
+    for i in range(2, len(information[0])):
+        state_t = np.concatenate((state_t, information[0][i][np.newaxis, :]), axis=0)
+        movement = np.concatenate((movement, information[1][i][np.newaxis]), axis=0)
+        reward = np.concatenate((reward, information[2][i][np.newaxis]), axis=0)
+    data.append([state_t, movement, reward])
+
 def generate_reward_dataset(file, phases=8, infer='NN_st'):
     # prepare data for training reward_inference model
     # data formation [N_samples, [state_t, phase_t, reward, state_tp, phase_tp]]
@@ -63,6 +74,33 @@ def generate_reward_dataset(file, phases=8, infer='NN_st'):
     y_test = target[sample_idx[int(0.8 * total_idx) :]]
     dataset = {'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test}
     return dataset
+
+def generate_reward_dataset_hetero(file):
+    # prepare data for training reward_inference model
+    # data formation [N_samples, [state_t, phase_t, reward, state_tp, phase_tp]]
+    # TODO: need aggregated and separate rewards
+    with open(file, 'rb') as f:
+        contents = pkl.load(f)
+    # training sample [state_t, onehot(phase_t)], target [reward]
+    feature = list()
+    target = list()
+    for sample in contents:
+        feature_t = np.concatenate(sample[0], sample[1], axis=1)
+        feature.append(feature_t)
+        target.append(sample[2])
+
+    feature= np.concatenate(feature)
+    target = np.concatenate(target)
+    total_idx = len(target)
+    sample_idx = range(total_idx)
+    sample_idx = random.sample(sample_idx, len(sample_idx))
+    x_train = feature[sample_idx[: int(0.8 * total_idx)]]
+    y_train = target[sample_idx[: int(0.8 * total_idx)]]
+    x_test = feature[sample_idx[int(0.8 * total_idx) :]]
+    y_test = target[sample_idx[int(0.8 * total_idx) :]]
+    dataset = {'x_train': x_train, 'y_train': y_train, 'x_test': x_test, 'y_test': y_test}
+    return dataset
+
 
 def build_road_state(raw_state, relation, mask_pos):
     '''
