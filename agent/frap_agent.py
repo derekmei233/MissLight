@@ -189,10 +189,10 @@ class FRAP_DQNAgent(RLAgent):
         comp_mask = torch.from_numpy(np.asarray(comp_mask))
         return comp_mask 
 
-    def choose(self, ob, phase, relation=None):
+    def choose(self, ob, phase):
         if np.random.rand() <= self.epsilon:
             return self.action_space.sample()
-        return self.get_action(ob, phase, relation)
+        return self.get_action(ob, phase)
 
     def get_ob(self):
         '''
@@ -205,6 +205,9 @@ class FRAP_DQNAgent(RLAgent):
         tmp = self.ob_generator[0].generate()
         return [np.dot(tmp, self.lane2movements), np.array(self.ob_generator[1].generate())]
     
+    def get_orig_ob(self):
+        return self.ob_generator[0].generate()
+
     def get_delay(self):
         return np.mean(self.ob_generator[2].generate())
     
@@ -225,7 +228,7 @@ class FRAP_DQNAgent(RLAgent):
         phase = (np.concatenate(phase)).astype(np.int8)
         return phase
 
-    def get_action(self, ob, phase, test=False):
+    def get_action(self, ob, phase):
         '''
         get_action
         Generate action.
@@ -235,17 +238,18 @@ class FRAP_DQNAgent(RLAgent):
         :param test: boolean, decide whether is test process
         :return: action that has the highest score
         '''
-        if not test:
-            if np.random.rand() <= self.epsilon:
-                return self.sample()
         if self.phase2movements.shape[0] == 1:
             return np.array(0)
+
 
         feature = np.concatenate([phase.reshape(1,-1), ob.reshape(1,-1)], axis=1)
         observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
         actions = self.model(observation, train=False)
         actions = actions.to('cpu').clone().detach().numpy()
         return np.argmax(actions, axis=1).squeeze()
+    
+    def get_movement_state(self, states):
+        return np.dot(states, self.lane2movements)
 
     def sample(self):
         return self.action_space.sample()

@@ -3,12 +3,12 @@ from predictionModel.NN import NN_predictor
 from predictionModel.SFM import SFMHetero_predictor
 
 import pickle as pkl
-from utils.preparation import get_mask_matrix, fork_config
+from utils.preparation import fork_config, state_lane_convertor
 from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents_hetero, create_app1maxp_agents_hetero
 
 from utils.data_generation import generate_reward_dataset_hetero
 from utils.control import fixedtime_execute, naive_train_hetero, app1maxp_train_hetero
-from utils.mask_pos import random_mask
+
 import argparse
 from pathlib import Path
 from datetime import datetime
@@ -37,7 +37,7 @@ parser.add_argument('--config', type=str, default='atlanta1x5', help='network wo
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=100, help='training episodes')
+parser.add_argument('--episodes', type=int, default=30, help='training episodes')
 parser.add_argument('--prefix', default='hetero', type=str)
 parser.add_argument('--debug', action='store_true')
 
@@ -136,11 +136,9 @@ if __name__ == "__main__":
         agents = create_app1maxp_agents_hetero(world, mask_pos, device=DEVICE)
         env = create_env(world, agents)
 
-        adj_matrix = get_road_adj(relation)
-        mask_matrix = get_mask_matrix(relation, mask_pos)
-        state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-
-        app1maxp_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE,agent_name=args.agent)
+        converter = state_lane_convertor(agents, mask_pos)
+        state_inference_net = SFMHetero_predictor(converter)
+        app1maxp_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, SAVE_RATE)
 
     # elif args.control == 'S-S-O':
     #     agents = create_shared_agents(world, mask_pos,agent=args.agent, device=DEVICE)

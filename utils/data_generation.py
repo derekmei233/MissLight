@@ -85,7 +85,7 @@ def generate_reward_dataset_hetero(file):
     feature = list()
     target = list()
     for sample in contents:
-        feature_t = np.concatenate(sample[0], sample[1], axis=1)
+        feature_t = np.concatenate((sample[0], sample[1]), axis=1)
         feature.append(feature_t)
         target.append(sample[2])
 

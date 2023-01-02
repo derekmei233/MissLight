@@ -94,6 +94,7 @@ class SFMHetero_predictor(object):
         return self
 
     def eval(self, x_test, y_test):
+        # TODO: revise eval function
         y_pred = mask_with_truth(y_test, self.mask_matrix, self.adj_matrix, self.pattern)
         test_dataset = SFM_dataset(y_pred.transpose(0, 2, 1, 3), y_test.transpose(0, 2, 1, 3))
         test_loader = DataLoader(test_dataset, batch_size=64)

@@ -48,6 +48,15 @@ class state_lane_convertor(object):
         self.states_index = self._lane2state()
         self.unmask_num = self.n_lanes - len(np.where(self.lane_mask)[0])
 
+    def _feature2lane(self):
+        generators = self.generators
+        feature2lane = []
+        for g in generators:
+            for lane in g.lanes:
+                for l in lane:
+                    feature2lane.append(l)
+        return feature2lane
+
     def _generate_phase_connectivity(self):
         generators = self.generators
         feature2lane = []
@@ -105,8 +114,9 @@ class state_lane_convertor(object):
     def lane2state(self, lanes):
         states = []
         for idx in range(len(self.generators)):
-            state = lanes[self.states_index[idx][0]:self.states_index[idx][1]]
+            state = np.array(lanes[self.states_index[idx][0]:self.states_index[idx][1]])
             states.append(state)
+        # strange bug, another loop after iteration finished
         return states
     
     def state2lane(self, states):

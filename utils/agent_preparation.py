@@ -183,9 +183,9 @@ def create_app1maxp_agents_hetero(world, mask_pos, device):
                 [
                     LaneVehicleGenerator(world, i, ["lane_count"], in_only=True, average=None),
                     IntersectionPhaseGenerator(world, i, ["phase"], targets=["cur_phase"], negative=False),
-                    LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average=None)
+                    LaneVehicleGenerator(world, i, ["lane_delay"], in_only=True, average='all')
                 ],
-                LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average=None, negative=True),
+                LaneVehicleGenerator(world, i, ["lane_waiting_count"], in_only=True, average='all', negative=True),
                 i.id, idx, device
             ))
         else:

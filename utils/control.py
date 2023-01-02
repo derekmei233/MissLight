@@ -200,6 +200,7 @@ def naive_train_hetero(logger, env, agents, episodes, action_interval, save_rate
 
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
+
         episodes_rewards = [0 for _ in agents]
         episodes_decision_num = 0
         last_observable = []
@@ -278,7 +279,11 @@ def naive_execute_hetero(logger, env, agents, e, best_att, information, action_i
             actions = []
             delays = []
             for agent_id, agent in enumerate(agents):
-                actions.append(agent.get_action(last_states[agent_id], last_phases[agent_id]))
+                if agent.name == 'FixedTimeAgent':
+                    action = agent.get_action(last_states[agent_id], last_phases[agent_id])
+                    actions.append(action)
+                else:
+                    actions.append(agent.get_action(last_states[agent_id], last_phases[agent_id]))
                 delays.append(agent.get_delay())
             delay_list += np.array(delays)
             count += 1
@@ -475,19 +480,25 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     return best_att
 
 # I-M 
-def app1maxp_train_hetero(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate):
+def app1maxp_train_hetero(logger, env, agents, episode, action_interval, state_inference_net, save_rate):
     logger.info("Independent FRAP_move - Max Pressure control")
     total_decision_num = 0
     best_att = np.inf
-    record = MSEMetric('state mse', mask_pos)
+    state_inference_net = state_inference_net
+    converter = state_inference_net.converter
+    record = MSEMetric('state mse', converter.mask_pos)
     for e in range(episode):
         # collect [state_t, phase_t, reward_t, state_tp, phase_tp(action_t)] pair at observable intersections
         last_obs = env.reset()
         last_states, last_phases = list(zip(*last_obs))
-        last_states = np.array(last_states, dtype=np.float32)
-        last_phases = np.array(last_phases, dtype=np.int8)
-        last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-        record.add(last_states, last_recovered)
+        # last_states = np.array(last_states, dtype=np.float32)
+        # last_phases = np.array(last_phases, dtype=np.int8)
+
+        last_lane_states = [ag.get_orig_ob() for ag in agents]
+        recovered_last_states, _ = state_inference_net.predict(None, None, last_lane_states)
+        recovered_last_lanes = converter.state2lane(recovered_last_states)
+        record.add(last_lane_states, recovered_last_states)
+
         episodes_rewards = [0 for _ in agents]
         i = 0
         episodes_decision_num = 0
@@ -498,11 +509,11 @@ def app1maxp_train_hetero(logger, env, agents, episode, action_interval, inferen
                 actions = []
                 for agent_id, agent in enumerate(agents):
                     if agent.name == 'MaxPressureAgent':
-                        action = agent.get_action(last_recovered, last_phases, relation)
+                        action = agent.get_action(recovered_last_lanes, last_phases, converter)
                         actions.append(action)
                     else:
                         if total_decision_num > agent.learning_start:
-                            actions.append(agent.choose(last_recovered, last_phases, relation))
+                            actions.append(agent.choose(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id]))
                         else:
                             actions.append(agent.sample())
                 rewards_list = []
@@ -511,7 +522,10 @@ def app1maxp_train_hetero(logger, env, agents, episode, action_interval, inferen
                     i += 1
                     rewards_list.append(rewards)
                 rewards = np.mean(rewards_list, axis=0)
-                rewards = np.mean(rewards, axis=1)
+
+                # cur_states = np.array(cur_states, dtype=np.float32)
+                # cur_phases = np.array(cur_phases, dtype=np.int8)
+
                 for agent_id, agent in enumerate(agents):
                     if agent.name == 'MaxPressureAgent':
                         pass
@@ -520,11 +534,16 @@ def app1maxp_train_hetero(logger, env, agents, episode, action_interval, inferen
                         episodes_rewards[agent_id] += rewards[agent_id]
                         episodes_decision_num += 1
                 total_decision_num += 1
+
+                cur_states, cur_phases = list(zip(*obs))
+                cur_lane_states = [ag.get_orig_ob() for ag in agents]
+                recovered_cur_states, _ = state_inference_net.predict(last_lane_states, actions, cur_lane_states)
+                recovered_cur_lanes = converter.state2lane(recovered_cur_states)
                 last_obs = obs
-                last_states, last_phases = list(zip(*last_obs))
-                last_states = np.array(last_states, dtype=np.float32)
-                last_phases = np.array(last_phases, dtype=np.int32)
-                last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+                last_states, last_phases = cur_states, cur_phases
+                last_lane_states = cur_lane_states
+                recovered_last_lanes = recovered_cur_lanes
+                recovered_last_states = recovered_cur_states
             for agent_id, agent in enumerate(agents):
                 if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
                     agent.replay()
@@ -534,13 +553,72 @@ def app1maxp_train_hetero(logger, env, agents, episode, action_interval, inferen
         record.update()
         logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
-        best_att = app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, action_interval, mask_pos, relation, mask_matrix, adj_matrix, save_rate)
+        best_att = app1maxp_execute_hetero(logger, env, agents, e, best_att, record, state_inference_net, action_interval, save_rate)
     avg_mse = record.get_result()
 
     logger.info(f'approach 1: maxpressure average travel time result: {best_att}')
     logger.info(f'final mse is: {avg_mse}')
     logger.info('-' * 50)
     return record
+
+def app1maxp_execute_hetero(logger, env, agents, e, best_att, record, state_inference_net, action_interval, save_rate):
+    if e % save_rate == save_rate - 1:
+        env.eng.set_save_replay(True)
+        name = logger.handlers[0].baseFilename
+        save_dir = Path(name[name.index('output_data'): name.index('logging')])
+        env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e))
+    else:
+        env.eng.set_save_replay(False)
+    i = 0
+    count = 0
+    converter = state_inference_net.converter
+    last_obs = env.reset()
+    last_states, last_phases = list(zip(*last_obs))
+    last_lane_states = [ag.get_orig_ob() for ag in agents]
+    recovered_last_states, _ = state_inference_net.predict(None, None, last_lane_states)
+    recovered_last_lanes = converter.state2lane(recovered_last_states)
+
+    record.add(last_lane_states, recovered_last_states)
+    delay_list = np.zeros([1, len(agents)])
+    while i < 3600:
+        if i % action_interval == 0:
+            # TODO: implement other State inference model later
+            # SFM inference states
+            actions = []
+            delays = []
+            for agent_id, agent in enumerate(agents):
+                #if ag.name == 'MaxPressureAgent':
+                if agent.name == 'MaxPressureAgent':
+                    action = agent.get_action(recovered_last_lanes, last_phases, converter)
+                    delays.append(agent.get_delay())
+                ## elif ag.name =='IDQNAgent':
+                else:
+                    action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
+                    delays.append(agent.get_delay())
+                actions.append(action)
+            delay_list += np.array(delays)
+            count += 1
+            for _ in range(action_interval):
+                obs, _, _, _ = env.step(actions)
+                i += 1
+            states, phases = list(zip(*obs))
+            lane_states = [ag.get_orig_ob() for ag in agents]
+            recovered_states, _ = state_inference_net.predict(last_lane_states, actions, lane_states)
+            recovered_lanes = converter.state2lane(recovered_states)
+            last_obs = obs
+            last_states, last_phases = states, phases
+            last_lane_states = lane_states
+            recovered_last_lanes = recovered_lanes
+            recovered_last_states = recovered_states
+    cur_mse = record.get_cur_result()
+    record.update()
+    att = env.eng.get_average_travel_time()
+    if att < best_att:
+        best_att = att
+    logger.info("episode:{}, Test:{}".format(e, att))
+    logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info(f'delay: {np.array(delay_list) / count}')
+    return best_att
 
 # S-S-O
 def app1_trans_train(logger, env, agents, episode, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix, save_rate,agent_name):
