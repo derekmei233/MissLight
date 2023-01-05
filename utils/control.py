@@ -844,7 +844,7 @@ def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_in
             recovered_last_states = recovered_states
             record.add(last_lane_states, recovered_last_states)
     cur_mse = record.get_cur_result()
-    record.update()
+    #record.update()
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
     record.update()
