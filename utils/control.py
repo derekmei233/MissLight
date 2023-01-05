@@ -797,7 +797,7 @@ def app1_trans_train_hetero(logger, env, agents, episodes, action_interval, stat
         record.update()
         logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
         logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
-        best_att = app1maxp_execute_hetero(logger, env, agents, e, best_att, record, state_inference_net, action_interval, save_rate)
+        best_att = app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_inference_net, action_interval, save_rate)
     avg_mse = record.get_result()
     logger.info(f'approach 1: transfer Frap_move Observable average travel time result: {best_att}')
     logger.info(f'final mse is: {avg_mse}')
@@ -820,6 +820,7 @@ def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_in
     last_lane_states = [ag.get_orig_ob() for ag in agents]
     recovered_last_states, _ = state_inference_net.predict(None, None, last_lane_states)
     recovered_last_lanes = converter.state2lane(recovered_last_states)
+    delay_list = np.zeros([1, agents[0].sub_agents])
     while i < 3600:
             actions = []
             delays = []
