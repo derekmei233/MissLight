@@ -7,7 +7,7 @@ from agent.sdqn_agent import SDQNAgent, build_shared_model
 from agent.idqn_agent import IDQNAgent
 from agent.fixedtime_agent import FixedTimeAgent
 from agent.frap_agent import FRAP_DQNAgent
-from agent.frap_shared_agent import FRAP_SH_Agent, build_shared_2_model
+from agent.frap_shared_agent import FRAP_SH_Agent, build_shared_model2
 
 import gym
 import torch.optim as optim
@@ -248,10 +248,34 @@ def create_shared_agents(world, mask_pos,agent, device):
         q_model = build_shared_model(ob_length, action_space)
         target_q_model = build_shared_model(ob_length, action_space)
     else:
-        q_model = build_shared_2_model(ob_length, action_space)
-        target_q_model = build_shared_2_model(ob_length, action_space)
+        q_model = build_shared_model2(ob_length, action_space)
+        target_q_model = build_shared_model2(ob_length, action_space)
     optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
     agents.append(New_Agent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer, device))
+    return agents
+
+def create_shared_agent_hetero(world, mask_pos, device):
+    agents = []
+    q_model = build_shared_model2(device)
+    target_q_model = build_shared_model2(device)
+    New_Agent = FRAP_SH_Agent
+    obs_pos = list(set(range(len(world.intersections))) - set(mask_pos))
+    for idx, inter in enumerate(world.intersections):
+        action_space = gym.spaces.Discrete(len(inter.phases))
+        if idx in obs_pos:
+            trainable = True
+        else:
+            trainable = False
+        agents.append(New_Agent(
+            action_space,
+            [
+                LaneVehicleGenerator(world, inter, ['lane_count'], in_only=True, average=None),
+                IntersectionPhaseGenerator(world, inter, ["phase"], targets=['cur_phase'], negative=False),
+                LaneVehicleGenerator(world, inter, ["lane_delay"], in_only=True, average='all')
+            ],
+            LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average='all', negative=True),
+            inter.id, idx, trainable, q_model, target_q_model, device
+            ))
     return agents
 
 def create_model_based_agents(world, mask_pos, device,agent):

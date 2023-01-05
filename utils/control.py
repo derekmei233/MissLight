@@ -544,6 +544,7 @@ def app1maxp_train_hetero(logger, env, agents, episode, action_interval, state_i
                 last_lane_states = cur_lane_states
                 recovered_last_lanes = recovered_cur_lanes
                 recovered_last_states = recovered_cur_states
+                record.add(last_lane_states, recovered_last_states)
             for agent_id, agent in enumerate(agents):
                 if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
                     agent.replay()
@@ -610,6 +611,7 @@ def app1maxp_execute_hetero(logger, env, agents, e, best_att, record, state_infe
             last_lane_states = lane_states
             recovered_last_lanes = recovered_lanes
             recovered_last_states = recovered_states
+            record.add(last_lane_states, recovered_last_states)
     cur_mse = record.get_cur_result()
     record.update()
     att = env.eng.get_average_travel_time()
@@ -720,6 +722,128 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
             phases = np.array(phases, dtype = np.int8)
             recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(states, recovered)
+    att = env.eng.get_average_travel_time()
+    cur_mse = record.get_cur_result()
+    record.update()
+    if att < best_att:
+        best_att = att
+    logger.info("episode:{}, Test:{}".format(e, att))
+    logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info(f'delay: {np.array(delay_list) / count}')
+    return best_att
+
+
+# S-S-O
+def app1_trans_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, save_rate):
+    # this method is used in approach 1 ,transfer and approach 2, shared-parameter. 
+    logger.info("SHARED FRAP_move - O control")
+    total_decision_num = 0
+    best_att = np.inf
+    state_inference_net = state_inference_net
+    converter = state_inference_net.converter
+    record = MSEMetric('state mse', converter.mask_pos)
+    for e in range(episodes):
+        last_obs = env.reset()
+        last_states, last_phases = list(zip(*last_obs))
+
+        # only recover state_t since we need this var to determine action t
+        last_lane_states = [ag.get_orig_ob() for ag in agents]
+        recovered_last_states, _ = state_inference_net.predict(None, None, last_lane_states)
+        recovered_last_lanes = converter.state2lane(recovered_last_states)
+        record.add(last_lane_states, recovered_last_states)
+
+        episodes_rewards = [0 for _ in agents]
+        i = 0
+        episodes_decision_num = 0
+        while i < 3600:
+            if i % action_interval == 0:
+                actions = []
+                for agent_id, agent in enumerate(agents):
+                    if total_decision_num > agent.learning_start:
+                        action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
+                        actions.append(action)
+                    else:
+                        actions.append(agent.sample())
+                rewards_list = []
+                for _ in range(action_interval):
+                    obs, rewards, _, _ = env.step(actions)
+                    i += 1
+                    rewards_list.append(rewards)
+                rewards_train = np.mean(rewards_list, axis=0)
+                rewards = np.mean(rewards_list, axis=0)
+
+                for agent_id, agent in enumerate(agents):
+                    agent.remember(last_obs[agent_id], actions[agent_id], rewards[agent_id], obs[agent_id]) # no need to change obs
+                    episodes_rewards[agent_id] += rewards[agent_id]
+                    episodes_decision_num += 1
+                total_decision_num += 1
+
+                cur_states, cur_phases = list(zip(*obs))
+                cur_lane_states = [ag.get_orig_ob() for ag in agents]
+                recovered_cur_states, _ = state_inference_net.predict(last_lane_states, actions, cur_lane_states)
+                recovered_cur_lanes = converter.state2lane(recovered_cur_states)
+                last_obs = obs
+                last_states, last_phases = cur_states, cur_phases
+                last_lane_states = cur_lane_states
+                recovered_last_lanes = recovered_cur_lanes
+                recovered_last_states = recovered_cur_states
+                record.add(last_lane_states, recovered_last_states)
+            for agent_id, agent in enumerate(agents):
+                if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
+                    agent.replay()
+                if total_decision_num > agent.learning_start and total_decision_num % agent.update_target_model_freq == agent.update_target_model_freq - 1:
+                    agent.update_target_network()
+        cur_mse = record.get_cur_result()
+        record.update()
+        logger.info("episode:{}, Train:{}".format(e, env.eng.get_average_travel_time()))
+        logger.info("episode:{}, MSETrain:{}".format(e, cur_mse))
+        best_att = app1maxp_execute_hetero(logger, env, agents, e, best_att, record, state_inference_net, action_interval, save_rate)
+    avg_mse = record.get_result()
+    logger.info(f'approach 1: transfer Frap_move Observable average travel time result: {best_att}')
+    logger.info(f'final mse is: {avg_mse}')
+    logger.info('-' * 50)
+    return record
+
+def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_inference_net, action_interval, save_rate):
+    if e % save_rate == save_rate - 1:
+        env.eng.set_save_replay(True)
+        name = logger.handlers[0].baseFilename
+        save_dir = Path(name[name.index('output_data'): name.index('logging')])
+        env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "replay_%s.txt" % e))
+    else:
+        env.eng.set_save_replay(False)
+    i = 0
+    count = 0
+    converter = state_inference_net.converter
+    last_obs = env.reset()
+    last_states, last_phases = list(zip(*last_obs))
+    last_lane_states = [ag.get_orig_ob() for ag in agents]
+    recovered_last_states, _ = state_inference_net.predict(None, None, last_lane_states)
+    recovered_last_lanes = converter.state2lane(recovered_last_states)
+    while i < 3600:
+            actions = []
+            delays = []
+            for agent_id, agent in enumerate(agents):
+                action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
+                delays.append(agent.get_delay())
+                actions.append(action)
+            delay_list += np.array(delays)
+            count += 1
+            for _ in range(action_interval):
+                obs, _, _, _ = env.step(actions)
+                i += 1
+            states, phases = list(zip(*obs))
+            lane_states = [ag.get_orig_ob() for ag in agents]
+            recovered_states, _ = state_inference_net.predict(last_lane_states, actions, lane_states)
+            recovered_lanes = converter.state2lane(recovered_states)
+            last_obs = obs
+            last_states, last_phases = states, phases
+            last_lane_states = lane_states
+            recovered_last_lanes = recovered_lanes
+            recovered_last_states = recovered_states
+            record.add(last_lane_states, recovered_last_states)
+    cur_mse = record.get_cur_result()
+    record.update()
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
     record.update()

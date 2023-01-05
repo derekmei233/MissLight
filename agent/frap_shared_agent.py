@@ -1,73 +1,36 @@
 # -*- coding: utf-8 -*-
-import gym
-import torch
-
-from generator import LaneVehicleGenerator, IntersectionPhaseGenerator
-
-from .rl_agent import RLAgent
+from ctypes import util
+from . import RLAgent
+import random
 import numpy as np
 from collections import deque
-import os
-from torch import nn
+from pathlib import Path
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import random
-from utils.preparation import build_relation, get_road_adj, get_mask_matrix
-from utils.mask_pos import random_mask
-from world import World
-from environment import TSCEnv
+#from common.registry import Registry
+import gym
+from generator import LaneVehicleGenerator, IntersectionPhaseGenerator, IntersectionVehicleGenerator
+from torch.nn.utils import clip_grad_norm_
+from . import BaseAgent
+from copy import deepcopy
+import os
 
 
-def one_hot(phase, num_class):
-    assert num_class > phase.max()
-    one_hot = np.zeros((len(phase), num_class))
-    one_hot[range(0, len(phase)), phase.squeeze()] = 1
-    # one_hot = one_hot.reshape(*phase.shape, num_class)
-    return one_hot
-
-phase_pairs=[[4, 10], [1, 7], [3, 9], [0, 6], [9, 10], [3, 4], [6, 7], [0, 1]]
-
-
-def relation():
-    comp_mask = []
-    for i in range(len(phase_pairs)):
-        zeros = np.zeros(len(phase_pairs) - 1, dtype=np.int)
-        cnt = 0
-        for j in range(len(phase_pairs)):
-            if i == j: continue
-            pair_a = phase_pairs[i]
-            pair_b = phase_pairs[j]
-            if len(list(set(pair_a + pair_b))) == 3: zeros[cnt] = 1
-            cnt += 1
-        comp_mask.append(zeros)
-    comp_mask = torch.from_numpy(np.asarray(comp_mask))
-    return comp_mask
-
-comp_mask=relation()
-
-def build_shared_2_model(ob_length,action_space):
-    model=FRAP(ob_length,action_space.n,phase_pairs,comp_mask)
+def build_shared_model2(device):
+    # Neural Net for Deep-Q learning Model
+    model = FRAP_move(device).to(device)
     return model
 
-class FRAP(nn.Module):
-    def __init__(self, size_in,output_shape, phase_pairs,
-                 competition_mask):
-        super(FRAP, self).__init__()
-        self.dic_phase_expansion =  {
-                    1: [0, 0, 1, 0, 0, 0, 1, 0],
-                    2: [1, 0, 0, 0, 1, 0, 0, 0],
-                    3: [0, 0, 0, 1, 0, 0, 0, 1],
-                    4: [0, 1, 0, 0, 0, 1, 0, 0],
-                    5: [0, 0, 0, 0, 0, 0, 1, 1],
-                    6: [0, 0, 1, 1, 0, 0, 0, 0],
-                    7: [0, 0, 0, 0, 1, 1, 0, 0],
-                    8: [1, 1, 0, 0, 0, 0, 0, 0]
-        }
-        self.oshape = output_shape
-        self.phase_pairs = phase_pairs
-        self.comp_mask = competition_mask
+class FRAP_move(nn.Module):
+    '''
+    FRAP captures the phase competition relation between traffic movements through a modified network structure.
+    '''
+
+    def __init__(self, device):
+        super(FRAP_move, self).__init__()
+        self.device = device
         self.demand_shape = 1  # Allows more than just queue to be used
-        self.one_hot = False
         self.d_out = 4  # units in demand input layer
         self.p_out = 4  # size of phase embedding
         self.lane_embed_units = 16
@@ -86,99 +49,101 @@ class FRAP(nn.Module):
         self.hidden_layer = nn.Conv2d(20, 20, kernel_size=(1, 1))
         self.before_merge = nn.Conv2d(20, 1, kernel_size=(1, 1))
 
-    def _forward(self, states):
+    def _forward(self, states, phase2movements, oshape, comp_mask):
         '''
-        :params states: [agents, ob_length]
+        states: [agents, ob_length]
         ob_length:concat[len(one_phase),len(intersection_lane)]
         '''
-        #print(len(states))
-        #if(len(states)==20):
-            #states.resize_(1,12)
-        #print(states)
         # if lane_num=12,then num_movements=12, but turning right do not be used
-        num_movements = int((states.size()[1] - 1) / self.demand_shape) if not self.one_hot else int(
-            (states.size()[1] - len(self.phase_pairs)) / self.demand_shape)
+
+
+
+        num_movements = int((states.size()[1] - 1) / self.demand_shape)
         batch_size = states.size()[0]
-        acts = states[:, :1].to(torch.int64) if not self.one_hot else states[:, :len(self.phase_pairs)].to(torch.int64)
-        states = states[:, 1:] if not self.one_hot else states[:, len(self.phase_pairs):]
+        acts = states[:, :1].to(torch.int64)
+        states = states[:, 1:].unsqueeze(1).repeat(1, phase2movements.shape[0], 1)
         states = states.float()
 
         # Expand action index to mark demand input indices
         extended_acts = []
-        if not self.one_hot:
-            for i in range(batch_size):
-                act_idx = acts[i]
-                pair = self.phase_pairs[act_idx]
-                zeros = torch.zeros(num_movements, dtype=torch.int64)
-                zeros[pair[0]] = 1
-                zeros[pair[1]] = 1
-                extended_acts.append(zeros)
-            extended_acts = torch.stack(extended_acts)
-        else:
-            extended_acts = acts
-        phase_embeds = torch.sigmoid(self.p(extended_acts))
+        # for i in range(batch_size):
+        # # index of phase
+        #     act_idx = acts[i]
+        #     connectivity = self.phase2movements[act_idx]
+        #     extended_acts = torch.stack(connectivity)
+        # phase_embeds = torch.sigmoid(self.p(extended_acts))
 
-        phase_demands = []
+        connectivity = phase2movements[acts]
+        phase_embeds = torch.sigmoid(self.p(connectivity))  # [B, 4, 3, 12]
+
         # if num_movements == 12:
         #     order_lane = [0,1,3,4,6,7,9,10] # remove turning_right phase
         # else:
         #     order_lane = [i for i in range(num_movements)]
         # for idx, i in enumerate(order_lane):
-        for i in range(num_movements):
-            # phase = phase_embeds[:, idx]  # size 4
-            phase = phase_embeds[:, i]  # size 4
-            demand = states[:, i:i + self.demand_shape]
-            demand = torch.sigmoid(self.d(demand))  # size 4
-            phase_demand = torch.cat((phase, demand), -1)
-            phase_demand_embed = F.relu(self.lane_embedding(phase_demand))
-            phase_demands.append(phase_demand_embed)
-        phase_demands = torch.stack(phase_demands, 1)
-        # phase_demands_old = torch.stack(phase_demands, 1)
-        # # turn direction from NESW to ESWN
-        # if num_movements == 8:
-        #     phase_demands = torch.cat([phase_demands_old[:,2:,:],phase_demands_old[:,:2,:]],1)
-        # elif num_movements == 12:
-        #     phase_demands = torch.cat([phase_demands_old[:,3:,:],phase_demands_old[:,:3,:]],1)
+
+        # for i in range(num_movements):
+        #     # phase = phase_embeds[:, idx]  # size 4
+        #     phase = phase_embeds[:, i]  # size 4
+        #     demand = states[:, i:i+self.demand_shape]
+        #     demand = torch.sigmoid(self.d(demand))    # size 4
+        #     phase_demand = torch.cat((phase, demand), -1)
+        #     phase_demand_embed = F.relu(self.lane_embedding(phase_demand))
+        #     phase_demands.append(phase_demand_embed)
         # phase_demands = torch.stack(phase_demands, 1)
 
-        pairs = []
-        for pair in self.phase_pairs:
-            pairs.append(phase_demands[:, pair[0]] + phase_demands[:, pair[1]])
-
+        all_phase_demand = states * phase2movements  # [B, 3, 12] - checked
+        all_phase_demand = torch.sigmoid(self.d(all_phase_demand.unsqueeze(-1)))  # [B, 3, 12, 4] - checked
+        phase_demand = torch.cat((all_phase_demand, phase_embeds.repeat(1, phase2movements.shape[0], 1, 1)),
+                                 -1)  # B, 3, 12, 8]
+        phase_demand_embed = F.relu(self.lane_embedding(phase_demand))  # [B, 3, 12, 16]
+        phase_demand_agg = torch.sum(phase_demand_embed, dim=2)  # [B, 3, 16]
         rotated_phases = []
-        for i in range(len(pairs)):
-            for j in range(len(pairs)):
-                if i != j: rotated_phases.append(torch.cat((pairs[i], pairs[j]), -1))
-        rotated_phases = torch.stack(rotated_phases, 1)
+        for i in range(phase_demand_agg.shape[-2]):
+            for j in range(phase_demand_agg.shape[-2]):
+                if i != j: rotated_phases.append(torch.cat((phase_demand_agg[:, i, :], phase_demand_agg[:, j, :]), -1))
+        rotated_phases = torch.stack(rotated_phases, 1)  # [B, 2*3, 32]
         rotated_phases = torch.reshape(rotated_phases,
-                                       (batch_size, self.oshape, self.oshape - 1, 2 * self.lane_embed_units))
-        rotated_phases = rotated_phases.permute(0, 3, 1, 2)  # Move channels up
-        rotated_phases = F.relu(self.lane_conv(rotated_phases))  # Conv-20x1x1  pair demand representation
+                                       (batch_size, oshape, oshape - 1,
+                                        2 * self.lane_embed_units))  # [B, 3, 2, 32]
+        rotated_phases = rotated_phases.permute(0, 3, 1, 2)  # [B, 32, 3, 2]
+        rotated_phases = F.relu(self.lane_conv(rotated_phases))  # [B, 20, 3, 2]
+        # pairs = []
+        # for pair in self.phase_pairs:
+        #     pairs.append(phase_demands[:, pair[0]] + phase_demands[:, pair[1]])
+
+        # rotated_phases = []
+        # for i in range(len(pairs)):
+        #     for j in range(len(pairs)):
+        #         if i != j: rotated_phases.append(torch.cat((pairs[i], pairs[j]), -1))
+        # rotated_phases = torch.stack(rotated_phases, 1)
+        # rotated_phases = torch.reshape(rotated_phases,
+        #                                (batch_size, self.oshape, self.oshape - 1, 2 * self.lane_embed_units)) # [B, 3, 2, 16]
+        # rotated_phases = rotated_phases.permute(0, 3, 1, 2)  # Move channels up
+        # rotated_phases = F.relu(self.lane_conv(rotated_phases))  # Conv-20x1x1  pair demand representation
 
         # Phase competition mask
-        competition_mask = self.comp_mask.repeat((batch_size, 1, 1))
-        relations = F.relu(self.relation_embedding(competition_mask))
-        relations = relations.permute(0, 3, 1, 2)  # Move channels up
-        relations = F.relu(self.relation_conv(relations))  # Pair demand representation
+        competition_mask = comp_mask.repeat((batch_size, 1, 1))  # [B, 3, 2]
+        relations = F.relu(self.relation_embedding(competition_mask.long()))  # [B, 3, 2, 4] ?
+        relations = relations.permute(0, 3, 1, 2)  # [B, 4, 3, 2]
+        relations = F.relu(self.relation_conv(relations))  # [B, 20, 3, 2]
 
         # Phase pair competition
         combine_features = rotated_phases * relations
         combine_features = F.relu(self.hidden_layer(combine_features))  # Phase competition representation
-        combine_features = self.before_merge(combine_features)  # Pairwise competition result
+        combine_features = self.before_merge(combine_features)  # # [B, 1, 3, 2]
 
         # Phase score
-        combine_features = torch.reshape(combine_features, (batch_size, self.oshape, self.oshape - 1))
-        q_values = (lambda x: torch.sum(x, dim=2))(combine_features)  # (b,8)
+        combine_features = torch.reshape(combine_features, (batch_size, oshape, oshape - 1))  # [B, 3, 2]
+        q_values = (lambda x: torch.sum(x, dim=2))(combine_features)  # (B, 3)
         return q_values
 
-    def forward(self, states, train=True):
+    def forward(self, states, phase2movements, oshape, comp_mask, train=True):
         if train:
-            return self._forward(states)
+            return self._forward(states, phase2movements, oshape, comp_mask)
         else:
             with torch.no_grad():
-                return self._forward(states)
-
-
+                return self._forward(states, phase2movements, oshape, comp_mask)
 
 
 class FRAP_SH_Agent(RLAgent):
@@ -186,238 +151,338 @@ class FRAP_SH_Agent(RLAgent):
         all or observable intersections, we use it to process all information but only give it accessibility to observable ones
     """
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx,q_model,target_q_model,optimizer,device):
-        super().__init__(action_space, ob_generator, reward_generator)
-        self.iid = iid
-        self.idx = idx  # learnable index
-        self.sub_agents = len(iid)
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, trainable, q_model, target_q_model,
+                 device):
+        super(FRAP_SH_Agent,self).__init__(action_space, ob_generator, reward_generator)
+
+        self.inter_id = iid
+        self.idx = idx
+        self.trainable = trainable
+        self.sub_agents = 1
+        self.name=self.__class__.__name__
 
         self.ob_generator = ob_generator
-        ob_length = [self.ob_generator[0][0].ob_length, self.action_space.n]
+        ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
         self.ob_length = sum(ob_length)
 
-        self.phase_pairs=[[4, 10], [1, 7], [3, 9], [0, 6], [9, 10], [3, 4], [6, 7], [0, 1]]
+        self.lane_names = []
+        [self.lane_names.extend(l) for l in self.ob_generator[0].lanes]
+        self.directions = self.ob_generator[0].directions
+        self.road_names = self.ob_generator[0].roads
+        self.movements = [self._orthogonal_mapping(rad) for rad in self.directions]
+        self.twelve_movements = ['N_L', 'N_T', 'N_R', 'E_L', 'E_T', 'E_R', 'S_L', 'S_T', 'S_R', 'W_L', 'W_T', 'W_R']
+
+        self.world = self.ob_generator[0].world
+        #self.inter_id = self.world.intersection_ids[self.idx]
+        self.inter_obj = self.world.id2intersection[self.inter_id]
+
+        self.phase = True
+        self.one_hot = False
+        self.phase = True
+        assert self.phase is True
+        self.one_hot = False
+        assert self.one_hot is False
+
+        self.inter_info = \
+        [self.world.roadnet['intersections'][idx] for idx, i in enumerate(self.world.roadnet['intersections']) if
+         i['id'] == self.inter_id][0]
+        self.linkage_movement = {(i['startRoad'], i['endRoad']): i['type'] for i in self.inter_info['roadLinks']}
+        self.phase2movements = self._phase_avail_movements()
+        self.lane2movements = self._construct_lane2movement_mapping()
+        self.num_phases = self.phase2movements.shape[0]
+        self.num_actions = self.phase2movements.shape[0]
+
         self.comp_mask = self.relation()
+        self.phase2movements = torch.tensor(self.phase2movements).to(torch.int64)
         self.dic_phase_expansion = None
-        self.num_phases = len(self.phase_pairs)
-        self.num_actions = len(self.phase_pairs)
-        self.learnable = len(self.idx)
-        self.memory = [deque(maxlen=10000) for i in range(self.learnable)]  # number of samples
+        self.memory = deque(maxlen=5000) # number of samples
+        self.memory_with_history = deque(maxlen=5000)
 
         self.learning_start = 2000
         self.update_model_freq = 1
         self.update_target_model_freq = 20
+        self.grad_clip=5.0
         self.gamma = 0.95  # discount rate
-        self.epsilon = 0.1  # exploration rate
+        self.epsilon = 0.5  # exploration rate
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
-        self.learning_rate = 0.0001
+        self.learning_rate = 0.001
         self.batch_size = 64
-        self.device=device
+        self.device = device
 
         self.criterion = nn.MSELoss(reduction='mean')
-        self.model = q_model #self.build_shared_model()
+        self.model =q_model # self.build_shared_model()
 
-        self.target_model =  target_q_model #self.build_shared_model()
-        #self.optimizer = optimizer
-        self.optimizer = optimizer #optim.RMSprop(self.model.parameters(), lr=self.learning_rate, alpha=0.9, centered=False,
-                                       #eps=1e-7)
+        self.target_model = target_q_model  # self.build_shared_model()
+        self.update_target_network()
+        # self.optimizer = optimizer
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.learning_rate, eps=1e-7)
+
+    def _construct_lane2movement_mapping(self):
+        result = np.zeros([len(self.lane_names), len(self.twelve_movements)])
+        mapping = self.inter_info['roadLinks']
+        for r_link in mapping:
+            tp = r_link['type']
+            if tp == 'turn_left':
+                #  only work for atlanta now, remove U-turn
+                start_r = r_link['startRoad'].split('#')[0].replace('-', '')
+                end_r = r_link['endRoad'].split('#')[0].replace('-', '')
+                if start_r == end_r:
+                    continue
+                turn = 'L'
+            elif tp == 'go_straight':
+                turn = 'T'
+            elif tp == 'turn_right':
+                turn = 'R'
+            else:
+                raise ValueError
+            for l_link in r_link['laneLinks']:
+                idx = l_link['startLaneIndex']
+                r_idx = self.lane_names.index(r_link['startRoad']+'_'+str(idx))
+                c_idx = self.twelve_movements.index(self.movements[r_idx] + '_'+turn)
+                result[r_idx, c_idx] = 1
+        return result
+
+    def _orthogonal_mapping(self, rad):
+        if  rad > 5.49779 or rad < 0.785398:
+            return 'N'
+        elif rad >=0.785398 and rad < 2.35619:
+            return 'E'
+        elif rad >= 2.35619 and rad < 3.92699:
+            return 'S'
+        elif rad >= 3.92699 and rad < 5.49779:
+            return 'W'
+        else:
+            raise ValueError
+
+
+    def _phase_avail_movements(self):
+        # no yellow phase
+        result = np.zeros([self.action_space.n, len(self.twelve_movements)])
+        for p in range(self.action_space.n):
+            avail_road_links_id = self.inter_obj.phase_available_roadlinks[p]
+            for l in avail_road_links_id:
+                linkage = self.inter_obj.roadlinks[l]
+                start = linkage[0]
+                end = linkage[1]
+                tp = self.linkage_movement[(start, end)]
+                if tp == 'turn_left':
+                    #  only work for atlanta now, remove U-turn
+                    start_r = start.split('#')[0].replace('-', '')
+                    end_r = end.split('#')[0].replace('-', '')
+                    if start_r == end_r:
+                        continue
+                    turn = 'L'
+                elif tp == 'go_straight':
+                    turn = 'T'
+                elif tp == 'turn_right':
+                    turn = 'R'
+                d = self.movements[self.road_names.index(start)]
+                direction = self.twelve_movements.index(d + "_" + turn)
+                result[p, direction] = 1
+        return result
 
     def relation(self):
+        '''
+        relation
+        Get the phase competition relation between traffic movements.
+
+        :param: None
+        :return comp_mask: matrix of phase competition relation
+        '''
         comp_mask = []
-        for i in range(len(self.phase_pairs)):
-            zeros = np.zeros(len(self.phase_pairs) - 1, dtype=np.int)
+        # remove connection at all phase, then compute if there is a same connection here
+        removed_phase2movements = deepcopy(self.phase2movements)
+        removed_phase2movements[:, np.sum(self.phase2movements, axis=0) == self.phase2movements.shape[0]] = 0
+        for i in range(self.phase2movements.shape[0]):
+            zeros = np.zeros(self.phase2movements.shape[0] - 1, dtype=np.int)
             cnt = 0
-            for j in range(len(self.phase_pairs)):
+            for j in range(self.phase2movements.shape[0]):
                 if i == j: continue
-                pair_a = self.phase_pairs[i]
-                pair_b = self.phase_pairs[j]
-                if len(list(set(pair_a + pair_b))) == 3: zeros[cnt] = 1
+
+                pair_a = removed_phase2movements[i]
+                pair_b = removed_phase2movements[j]
+                if np.dot(pair_a, pair_b) >= 1: zeros[cnt] = 1
                 cnt += 1
             comp_mask.append(zeros)
         comp_mask = torch.from_numpy(np.asarray(comp_mask))
         return comp_mask
 
-    def choose(self, ob, phase, relation=None):
+    def choose(self, ob, phase):
         if np.random.rand() <= self.epsilon:
-            return self.sample()
-        return self.get_action(ob, phase, relation)
-
-    def get_action(self, ob, phase, relation=None):
-        # get all observation now
-        actions = []
-        for idx in range(self.sub_agents):
-            ob_oh =phase[idx:idx+1,:]
-            obs = torch.tensor(np.concatenate((ob_oh,ob[idx:idx+1,:]),axis=1)).float().to(self.device)
-            act_values = self.model.forward(obs, train=False)
-            actions.append(torch.argmax(act_values))
-        return actions
-
-    def build_shared_model(self):
-        model=FRAP(self.ob_length,self.action_space.n,self.phase_pairs,self.comp_mask)
-        return model
+            return self.action_space.sample()
+        return self.get_action(ob, phase)
 
     def get_ob(self):
-        obs = tuple([self.ob_generator[i][0].generate(), np.array(self.ob_generator[i][1].generate())]
-                    for i in range(self.sub_agents))
-        return obs
+        '''
+        get_ob
+        Get observation from environment.
 
-    def sample(self):
-        return [self.action_space.sample() for _ in range(self.sub_agents)]
+        :param: None
+        :return x_obs: observation generated by ob_generator
+        '''
+        tmp = self.ob_generator[0].generate()
+        return [np.dot(tmp, self.lane2movements), np.array(self.ob_generator[1].generate())]
+    
+    def get_orig_ob(self):
+        return self.ob_generator[0].generate()
+
+    def get_delay(self):
+        return np.mean(self.ob_generator[2].generate())
+    
+    def get_movement(self, phase):
+        movement = self.phase2movements[phase]
+        return np.array(movement)
+
+    def get_movement_state(self, states):
+        return np.dot(states, self.lane2movements)
 
     def get_reward(self):
-        rewards = tuple([self.reward_generator[i].generate() for i in range(self.sub_agents)])
-        return rewards
+        reward = self.reward_generator.generate()
+        if len(reward) == 1:
+            return reward[0]
+        else:
+            return reward
 
+    def get_phase(self):
+        phase = []
+        phase.append(self.ob_generator[1].generate())
+        phase = (np.concatenate(phase)).astype(np.int8)
+        return phase
+
+    def get_action(self, ob, phase):
+        '''
+        get_action
+        Generate action.
+
+        :param ob: observation, the shape is (1,12)
+        :param phase: current phase, the shape is (1,)
+        :param test: boolean, decide whether is test process
+        :return: action that has the highest score
+        '''
+        if self.phase2movements.shape[0] == 1:
+            return np.array(0)
+
+        feature = np.concatenate([phase.reshape(1,-1), ob.reshape(1,-1)], axis=1)
+        observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
+        actions = self.model(observation, self.phase2movements, self.action_space.n, self.comp_mask, train=False)
+        actions = actions.to('cpu').clone().detach().numpy()
+        return np.argmax(actions, axis=1).squeeze()
 
     def _reshape_ob(self, ob):
         return np.reshape(ob, (1, -1))
 
     def update_target_network(self):
-        # only update model at idx == update_idx
         weights = self.model.state_dict()
         self.target_model.load_state_dict(weights)
 
-    def remember(self, ob, action, reward, next_ob, idx):
-        self.memory[self.idx.index(idx)].append((ob, action, reward, next_ob))
+    def remember(self, ob, action, reward, next_ob):
+        self.memory.append((ob[0].reshape(1,-1), ob[1], action, reward, next_ob[0].reshape(1,-1), next_ob[1]))
 
-    def _encode_sample(self, minibatch,batch_size):
-        # TODO: check dimension
-        obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
-        obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
-        # expand action to one_hot
-        #obs_oh = np.zeros((batch_size*self.learnable, 1))
-        #for i in range(batch_size*self.learnable):
-            #obs_oh[i] = obs[1][i]
-        obs_oh=np.expand_dims(obs[1],axis=1)
-        obs = np.concatenate((obs_oh, obs[0]), axis=1)
-        next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
-        # expand acton to one_hot
-        #next_obs_oh = np.zeros((batch_size*self.learnable, 1))
-        #for i in range(batch_size*self.learnable):
-            #next_obs_oh[i] = next_obs[1][i]
-        next_obs_oh=np.expand_dims(next_obs[1],axis=1)
-        # next_obs_oh[0]=next_obs[1].squeeze()
-        # next_obs_oh = one_hot(next_obs[1], self.action_space.n)
-        next_obs = np.concatenate((next_obs_oh, next_obs[0]), axis=1)
-        rewards = np.array(rewards_t, copy=False)
-        obs = torch.from_numpy(obs).float().to(self.device)
-        rewards = torch.from_numpy(rewards).float().to(self.device)
-        next_obs = torch.from_numpy(next_obs).float().to(self.device)
-        return obs, actions_t, rewards, next_obs
+    '''
+    def get_movement(self, phase):
+        movement = self.phase2movements[phase]
+        return np.array(movement)
+    '''
+    def get_reward(self):
+        reward = self.reward_generator.generate()
+        if len(reward) == 1:
+            return reward[0]
+        else:
+            return reward
+
+    def get_phase(self):
+        phase = []
+        phase.append(self.ob_generator[1].generate())
+        phase = (np.concatenate(phase)).astype(np.int8)
+        return phase
+
+    def sample(self):
+        return self.action_space.sample()
+
+    def _batchwise(self, samples):
+        '''
+        _batchwise
+        Reconstruct the samples into batch form(last state, current state, reward, action).
+
+        :param samples: original samples record in replay buffer
+        :return state_t, state_tp, rewards, actions: information with batch form
+        '''
+        # (batch_size,12)
+        obs_t_all=[item[0] for item in samples] # last_obs(batch, 1, lane_num)
+        obs_tp_all=[item[4] for item in samples] # cur_obs
+        # obs_t = [utils.remove_right_lane(x) for x in obs_t_all]
+        # obs_tp = [utils.remove_right_lane(x) for x in obs_tp_all]
+        obs_t = obs_t_all
+        obs_tp = obs_tp_all
+        obs_t = np.concatenate(obs_t) # (batch,lane_num)
+        obs_tp = np.concatenate(obs_tp) # (batch,lane_num)
+
+        phase_t = np.concatenate([item[1].reshape(1,-1) for item in samples]) # (batch, 1)
+        phase_tp = np.concatenate([item[5].reshape(1,-1) for item in samples])
+        feature_t = np.concatenate([phase_t, obs_t], axis=1) # (batch,ob_length)
+        feature_tp = np.concatenate([phase_tp, obs_tp], axis=1)
+        # (batch_size, ob_length)
+
+        state_t = torch.tensor(feature_t, dtype=torch.float32).to(self.device)
+        state_tp = torch.tensor(feature_tp, dtype=torch.float32).to(self.device)
+        # rewards:(64)
+        rewards = torch.tensor(np.array([item[3] for item in samples]), dtype=torch.float32).to(self.device)  # TODO: BETTER WA
+        # actions:(64,1)
+        actions = torch.tensor(np.array([item[2] for item in samples]), dtype=torch.long).to(self.device)
+        return state_t, state_tp, rewards, actions
 
     def replay(self):
-        # sample from all buffers
+        '''
+        train
+        Train the agent, optimize the action generated by agent.
 
-        minibatch = self._sample(self.batch_size)
-        obs, actions, rewards, next_obs = self._encode_sample(minibatch,self.batch_size)
-        out = self.target_model.forward(next_obs, train=False)
-        target = rewards + self.gamma * torch.max(out, dim=1)[0]
-        target_f = self.model.forward(obs, train=False)
+        :param: None
+        :return: value of loss
+        '''
+        if len(self.memory) < self.batch_size:
+            return
+        if self.trainable == False:
+            return
+        if self.action_space.n == 1:
+            return np.array(0)
+        # print(f'train on {self.inter_id}')
+        samples = random.sample(self.memory, self.batch_size)
+        b_t, b_tp, rewards, actions = self._batchwise(samples)
+        out = self.target_model(b_tp, self.phase2movements, self.action_space.n, self.comp_mask, train=False) # (batch_size,num_actions)
+        target = rewards + self.gamma * torch.max(out, dim=1)[0] # (batch_size)
+        target_f = self.model(b_t, self.phase2movements, self.action_space.n, self.comp_mask, train=False) # (batch_size,num_actions)
         for i, action in enumerate(actions):
             target_f[i][action] = target[i]
-        loss = self.criterion(self.model.forward(obs, train=True), target_f)
+
+        loss = self.criterion(self.model(b_t, self.phase2movements, self.action_space.n, self.comp_mask, train=True), target_f)
         self.optimizer.zero_grad()
         loss.backward()
+        clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+        return loss.to('cpu').clone().detach().numpy()
 
-    def _sample(self,batch_size):
-        mini_batch = []
-        for i in range(self.learnable):
-            mini_batch.extend(random.sample(self.memory[i], batch_size))
-        random.shuffle(mini_batch)
-        return mini_batch
-    
-    def get_latest_sample(self, infer='NN_st'):
-        sample = []
-        for idx,i in enumerate(self.idx):
-            sample.append(self.memory[idx][-1])
-        obs, actions, rewards, _ = list(zip(*sample))
-        states, phases = [np.stack(ob) for ob in list(zip(*obs))]
-        if infer == 'NN_st':
-            obs2 = one_hot(phases, self.action_space.n)
-        elif infer == 'NN_sta':
-            obs2 = one_hot(actions, self.action_space.n)
-        x = torch.from_numpy(np.concatenate((obs2,states), axis=1)).float().to(self.device)
-        target = torch.from_numpy(np.array(rewards)[:, np.newaxis]).float().to(self.device)
-        return x, target
-    
-    def replay_img(self, reward_model, update_times, infer='NN_st'):
-        if update_times == 0:
-            return
-        minibatch = self._sample(update_times)
-        obs, actions, rewards, next_obs = self._encode_sample(minibatch,update_times)
-        if infer == 'NN_st':
-            '''
-            tensor->one_hot
-            '''
-            tmp=obs[:,:1].cpu().detach().numpy().astype(np.int8)
-            states=obs[:,1:].cpu().detach().numpy()
-            ones=np.zeros((tmp.size,self.action_space.n)).astype(np.int8)
-            for i in range(tmp.size):
-                ones[i][tmp[i]]=1
-            x=torch.from_numpy(np.concatenate((states,ones),axis=1)).float().to(self.device)
-        elif infer == 'NN_sta':
-            obses_t, actions_t, _, _ = list(zip(*minibatch))
-            tmp = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
-            obs_oh = one_hot(actions_t, self.action_space.n)
-            x = torch.from_numpy(np.concatenate((tmp[0], obs_oh), axis=1)).float().to(self.device)
-        rewards = torch.squeeze(reward_model.predict(x), dim=1)
-        out = self.target_model.forward(next_obs, train=False)
-        target = rewards + self.gamma * torch.max(out, dim=1)[0]
-        target_f = self.model.forward(obs, train=False)
-        for i, action in enumerate(actions):
-            target_f[i][action] = target[i]
-        loss = self.criterion(self.model.forward(obs, train=True), target_f)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+    def _build_model(self):
+        # Neural Net for Deep-Q learning Model
+        model = FRAP_move(self.device).to(self.device)
+        return model
 
     def load_model(self, model_dir):
-        # only load for idx == min(self.all_id)
-        name = "sdqn.pt"
-        model_name = os.path.join(model_dir, name)
-        self.model = FRAP(self.ob_length, self.action_space.n,self.phase_pairs,self.comp_mask)
+        # TODO: add idqn
+        name = "frapdqn_{}.pt".format(self.inter_id)
+        model_name = Path.join(model_dir, name)
+        self.model = FRAP_move(self.device).to(self.device)
         self.model.load_state_dict(torch.load(model_name))
+        self.target_model = FRAP_move(self.device).to(self.device)
         self.target_model.load_state_dict(torch.load(model_name))
 
     def save_model(self, model_dir):
-        if not os.path.exists(model_dir):
-            os.makedirs(model_dir)
-        name = "sdqn.pt"
-        model_name = os.path.join(model_dir, name)
+        if not Path.exists(model_dir):
+            Path.mkdir(model_dir)
+        name = "frapdqn_{}.pt".format(self.inter_id)
+        model_name = Path.join(model_dir, name)
         torch.save(self.model.state_dict(), model_name)
 
-
-if __name__ == '__main__':
-    config_file = f'cityflow_hz4x4.cfg'
-    action_interval = 10
-    episodes = 3600
-    world = World(config_file, thread_num=8)
-    relation = build_relation(world)
-    mask_pos = random_mask(3, 'neighbor', relation)
-    obs_pos = set(range(len(world.intersections))) - set(mask_pos)
-    agents = []
-    iid = []
-    ob_generator = []
-    reward_generator = []
-    for idx, inter in enumerate(world.intersections):
-        ob_generator.append(
-            [
-                LaneVehicleGenerator(world, inter, ['lane_count'], in_only=True, average=None),
-                IntersectionPhaseGenerator(world, inter, targets=['cur_phase'], negative=False)
-            ])
-        reward_generator.append(
-            LaneVehicleGenerator(world, inter, ['lane_waiting_count'], in_only=True, average=None, negative=True))
-        iid.append(inter.id)
-    action_space = gym.spaces.Discrete(len(world.intersections[-1].phases))
-    ob_length = ob_generator[0][0].ob_length + action_space.n
-    q_model = build_shared_model(ob_length, action_space)
-    target_q_model = build_shared_model(ob_length, action_space)
-    optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
-    agents.append(
-        SDQNAgent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer))
-    env = TSCEnv(world, agents, None)
-    print('construction finished')

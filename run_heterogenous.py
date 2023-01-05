@@ -4,10 +4,10 @@ from predictionModel.SFM import SFMHetero_predictor
 
 import pickle as pkl
 from utils.preparation import fork_config, state_lane_convertor
-from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents_hetero, create_app1maxp_agents_hetero
+from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents_hetero, create_app1maxp_agents_hetero, create_shared_agent_hetero
 
 from utils.data_generation import generate_reward_dataset_hetero
-from utils.control import fixedtime_execute, naive_train_hetero, app1maxp_train_hetero
+from utils.control import fixedtime_execute, naive_train_hetero, app1maxp_train_hetero, app1_trans_train_hetero
 
 import argparse
 from pathlib import Path
@@ -37,12 +37,12 @@ parser.add_argument('--config', type=str, default='atlanta1x5', help='network wo
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=30, help='training episodes')
+parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 parser.add_argument('--prefix', default='hetero', type=str)
 parser.add_argument('--debug', action='store_true')
 
-parser.add_argument('--mask_pos', default='3', type=str)
-parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
+parser.add_argument('--mask_pos', default='2', type=str)
+parser.add_argument('-control', default='S-S-O', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
 
 
 if __name__ == "__main__":
@@ -140,24 +140,13 @@ if __name__ == "__main__":
         state_inference_net = SFMHetero_predictor(converter)
         app1maxp_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, SAVE_RATE)
 
-    # elif args.control == 'S-S-O':
-    #     agents = create_shared_agents(world, mask_pos,agent=args.agent, device=DEVICE)
-    #     env = create_env(world, agents)
-    #     adj_matrix = get_road_adj(relation)
-    #     mask_matrix = get_mask_matrix(relation, mask_pos)
-    #     state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-    #     if args.impute == 'sfm':
-    #         state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-    #         app1_trans_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE,agent_name=args.agent)
-    #     elif args.impute == 'gwn':
-    #         dj_matrix, phase_adj = get_road_adj_phase(relation)
-    #         data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-    #         with open(graphwn_dataset, 'rb') as f:
-    #             data = pkl.load(f)
-    #         N = data['adj_road'].shape[0]
-    #         state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
-    #         state_inference_net.load_model()
-    #         app1_trans_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
+    elif args.control == 'S-S-O':
+        agents = create_shared_agent_hetero(world, mask_pos, device=DEVICE)
+        env = create_env(world, agents)
+
+        converter = state_lane_convertor(agents, mask_pos)
+        state_inference_net = SFMHetero_predictor(converter)
+        app1_trans_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, SAVE_RATE)
 
     # elif args.control == 'I-I':
     #     agents = create_independent_agents(world,agent=args.agent, device=DEVICE)
