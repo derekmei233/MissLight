@@ -820,7 +820,7 @@ def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_in
     last_lane_states = [ag.get_orig_ob() for ag in agents]
     recovered_last_states, _ = state_inference_net.predict(None, None, last_lane_states)
     recovered_last_lanes = converter.state2lane(recovered_last_states)
-    delay_list = np.zeros([1, agents[0].sub_agents])
+    delay_list = np.zeros([1, len(agents)])
     while i < 3600:
             actions = []
             delays = []
@@ -828,7 +828,7 @@ def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_in
                 action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
                 delays.append(agent.get_delay())
                 actions.append(action)
-            delay_list += np.array(delays)
+            delay_list += np.array(delays)[np.newaxis,:]
             count += 1
             for _ in range(action_interval):
                 obs, _, _, _ = env.step(actions)
