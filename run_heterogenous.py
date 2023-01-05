@@ -4,10 +4,10 @@ from predictionModel.SFM import SFMHetero_predictor
 
 import pickle as pkl
 from utils.preparation import fork_config, state_lane_convertor
-from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents_hetero, create_app1maxp_agents_hetero, create_shared_agent_hetero
+from utils.agent_preparation import create_env, create_world, create_fixedtime_agents, create_preparation_agents_hetero, create_app1maxp_agents_hetero, create_shared_agents_hetero
 
 from utils.data_generation import generate_reward_dataset_hetero
-from utils.control import fixedtime_execute, naive_train_hetero, app1maxp_train_hetero, app1_trans_train_hetero
+from utils.control import fixedtime_execute, naive_train_hetero, app1maxp_train_hetero, app1_trans_train_hetero, app2_shared_train_hetero
 
 import argparse
 from pathlib import Path
@@ -41,8 +41,8 @@ parser.add_argument('--episodes', type=int, default=100, help='training episodes
 parser.add_argument('--prefix', default='hetero', type=str)
 parser.add_argument('--debug', action='store_true')
 
-parser.add_argument('--mask_pos', default='2', type=str)
-parser.add_argument('-control', default='S-S-O', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
+parser.add_argument('--mask_pos', default='3', type=str) # -1 if no mask position
+parser.add_argument('-control', default='S-S-A', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
 
 
 if __name__ == "__main__":
@@ -60,8 +60,8 @@ if __name__ == "__main__":
     state_dir = 'dataset'
     replay_dir = 'replay'
     log_dir = 'logging'
-    param_dir = Path.joinpath(Path(args.control), Path(args.mask_pos.replace(',', '_')))
-    root_dir = Path.joinpath(Path('data/output_data'), args.config, args.prefix)
+    param_dir = Path(args.control)
+    root_dir = Path.joinpath(Path('data/output_data'), args.config, args.prefix, Path(args.mask_pos.replace(',', '_')))
     cur_working_dir = Path.joinpath(root_dir, param_dir)
     model_dir = Path.joinpath(cur_working_dir, model_dir)
     log_dir = Path.joinpath(cur_working_dir, log_dir)
@@ -70,7 +70,6 @@ if __name__ == "__main__":
     dataset_root = Path.joinpath(root_dir, 'I-F')
     state_dir = Path.joinpath(dataset_root, state_dir)
     reward_model_dir = Path.joinpath(dataset_root, 'model')
-    state_model_dir = Path.joinpath(dataset_root, 'model')
 
     if not Path.exists(model_dir):
         model_dir.mkdir(parents=True)
@@ -120,7 +119,7 @@ if __name__ == "__main__":
 
         reward_dataset = generate_reward_dataset_hetero(save_reward_file) # default setting infer == 'st'
         #state_dataset = generate_state_dataset()
-        net = NN_predictor(IN_DIM, 1, DEVICE, state_model_dir, REWARD_TYPE) # generate reward inference model at model_dir
+        net = NN_predictor(IN_DIM, 1, DEVICE, reward_model_dir, REWARD_TYPE) # generate reward inference model at model_dir
         if not net.is_mode():
             net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
         else:
@@ -131,7 +130,6 @@ if __name__ == "__main__":
         env = create_env(world, agents)
         fixedtime_execute(logger, env, agents, action_interval)
 
-
     elif args.control == 'I-M':
         agents = create_app1maxp_agents_hetero(world, mask_pos, device=DEVICE)
         env = create_env(world, agents)
@@ -141,60 +139,19 @@ if __name__ == "__main__":
         app1maxp_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, SAVE_RATE)
 
     elif args.control == 'S-S-O':
-        agents = create_shared_agent_hetero(world, mask_pos, device=DEVICE)
+        agents = create_shared_agents_hetero(world, mask_pos, device=DEVICE)
         env = create_env(world, agents)
 
         converter = state_lane_convertor(agents, mask_pos)
         state_inference_net = SFMHetero_predictor(converter)
         app1_trans_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, SAVE_RATE)
 
-    # elif args.control == 'I-I':
-    #     agents = create_independent_agents(world,agent=args.agent, device=DEVICE)
-    #     env = create_env(world, agents)
-    #     adj_matrix = get_road_adj(relation)
-    #     mask_matrix = get_mask_matrix(relation, mask_pos)
-    #     state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-    #     app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
+    elif args.control == 'S-S-A':
+        agents = create_shared_agents_hetero(world, [], device=DEVICE)
+        env = create_env(world, agents)
 
-    # elif args.control == 'S-S-A':
-    #     agents = create_shared_agents(world, [],agent=args.agent, device='cpu')
-    #     env = create_env(world, agents)
-    #     adj_matrix, phase_adj = get_road_adj_phase(relation)
-    #     mask_matrix = get_mask_matrix(relation, mask_pos)
-    #     # if args.impute == 'sfm':
-    #     #     state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-    #     #     app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
-    #     if args.impute == 'sfm':
-    #         state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-    #         dj_matrix, phase_adj = get_road_adj_phase(relation)
-    #         data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-    #         app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device='cpu', save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
-    #     elif args.impute == 'gwn':
-    #         dj_matrix, phase_adj = get_road_adj_phase(relation)
-    #         data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-    #         with open(graphwn_dataset, 'rb') as f:
-    #             data = pkl.load(f)
-    #         N = data['adj_road'].shape[0]
-    #         state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
-    #         state_inference_net.load_model()
-    #         app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device='cpu', save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
-
-
-    # elif args.control == 'S-S-O-model_based':
-    #     agents = create_model_based_agents(world, mask_pos, device='cpu',agent=args.agent)
-    #     env = create_env(world, agents)
-    #     adj_matrix = get_road_adj(relation)
-    #     mask_matrix = get_mask_matrix(relation, mask_pos)
-    #     if args.impute == 'sfm':
-    #         state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-    #         model_based_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir,  reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, update_times=30)
-    #     elif args.impute == 'gwn':
-    #         dj_matrix, phase_adj = get_road_adj_phase(relation)
-    #         data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-    #         with open(graphwn_dataset, 'rb') as f:
-    #             data = pkl.load(f)
-    #         N = data['adj_road'].shape[0]
-    #         state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
-    #         state_inference_net.load_model()
-    #         model_based_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE, agent_name=args.agent,t_history=HISTORY_LENGTH, update_times=10)
-
+        converter = state_lane_convertor(agents, mask_pos)
+        state_inference_net = SFMHetero_predictor(converter)
+        reward_inference_net = NN_predictor(IN_DIM, 1, DEVICE, reward_model_dir, REWARD_TYPE)
+        reward_inference_net.load_model()
+        app2_shared_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, reward_inference_net, SAVE_RATE)

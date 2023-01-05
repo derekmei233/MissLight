@@ -8,13 +8,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-#from common.registry import Registry
-import gym
-from generator import LaneVehicleGenerator, IntersectionPhaseGenerator, IntersectionVehicleGenerator
 from torch.nn.utils import clip_grad_norm_
-from . import BaseAgent
 from copy import deepcopy
-import os
 
 
 def build_shared_model2(device):
@@ -447,7 +442,7 @@ class FRAP_SH_Agent(RLAgent):
             return
         if self.action_space.n == 1:
             return np.array(0)
-        # print(f'train on {self.inter_id}')
+        #print(f'train on {self.inter_id}')
         samples = random.sample(self.memory, self.batch_size)
         b_t, b_tp, rewards, actions = self._batchwise(samples)
         out = self.target_model(b_tp, self.phase2movements, self.action_space.n, self.comp_mask, train=False) # (batch_size,num_actions)

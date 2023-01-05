@@ -37,9 +37,11 @@ class MSEMetric(BaseMetric):
     def add(self, pred, true):
         # should be [N_intersection, N_features]
         err = []
-        for i in self.mask_pos:
-            err.append(np.square(pred[i] - true[i]))
-        diff = np.concatenate(err)
+        # for i in self.mask_pos:
+        #     err.append(np.mean(np.square(pred[i] - true[i])))
+        for i in range(len(pred)):
+            err.append(np.mean(np.square(pred[i] - true[i])))
+        diff = np.array(err)
         self.buffer.append(diff)
     
     def update(self):

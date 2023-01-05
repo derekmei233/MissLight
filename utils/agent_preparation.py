@@ -254,7 +254,7 @@ def create_shared_agents(world, mask_pos,agent, device):
     agents.append(New_Agent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer, device))
     return agents
 
-def create_shared_agent_hetero(world, mask_pos, device):
+def create_shared_agents_hetero(world, mask_pos, device):
     agents = []
     q_model = build_shared_model2(device)
     target_q_model = build_shared_model2(device)
@@ -305,8 +305,8 @@ def create_model_based_agents(world, mask_pos, device,agent):
         q_model = build_shared_model(ob_length, action_space)
         target_q_model = build_shared_model(ob_length, action_space)
     else:
-        q_model = build_shared_2_model(ob_length, action_space)
-        target_q_model = build_shared_2_model(ob_length, action_space)
+        q_model = build_shared_model2(ob_length, action_space)
+        target_q_model = build_shared_model2(ob_length, action_space)
     optimizer = optim.RMSprop(q_model.parameters(), lr=0.001, alpha=0.9, centered=False, eps=1e-7)
     agents.append(New_Agent(action_space, ob_generator, reward_generator, iid, obs_pos, q_model, target_q_model, optimizer, device))
-    return agents 
+    return agents

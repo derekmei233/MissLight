@@ -8,11 +8,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-#from common.registry import Registry
-import gym
-from generator import LaneVehicleGenerator, IntersectionPhaseGenerator, IntersectionVehicleGenerator
 from torch.nn.utils import clip_grad_norm_
-from . import BaseAgent
 from copy import deepcopy
 
 
@@ -28,7 +24,7 @@ class FRAP_DQNAgent(RLAgent):
         self.update_target_model_freq = 20
         self.gamma = 0.95
         self.grad_clip = 5.0
-        self.epsilon = 0.1
+        self.epsilon = 0.5
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
         self.learning_rate = 0.001
