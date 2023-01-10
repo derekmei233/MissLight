@@ -30,8 +30,7 @@ def one_hot(phase, num_class):
     one_hot = np.zeros((len(phase), num_class))
     one_hot[range(0, len(phase)), phase.squeeze()] = 1
     # one_hot = one_hot.reshape(*phase.shape, num_class)
-    return one_hot.squeeze(0)
-
+    return one_hot.squeeze()
 
 class state_lane_convertor(object):
     def __init__(self, agents, mask_pos):

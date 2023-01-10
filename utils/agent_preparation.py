@@ -3,7 +3,7 @@ from generator import LaneVehicleGenerator, IntersectionPhaseGenerator
 from environment import TSCEnv
 
 from agent.max_pressure_agent import MaxPressureAgent
-from agent.sdqn_agent import SDQNAgent, build_shared_model
+#from agent.sdqn_agent import SDQNAgent, build_shared_model
 from agent.idqn_agent import IDQNAgent
 from agent.fixedtime_agent import FixedTimeAgent
 from agent.frap_agent import FRAP_DQNAgent

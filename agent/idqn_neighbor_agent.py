@@ -36,7 +36,7 @@ class IDQN(nn.Module):
             with torch.no_grad():
                 return self._forward(x)
 
-class IDQNAgent(RLAgent):
+class NIDQNAgent(RLAgent):
     def __init__(self, action_space, ob_generator, reward_generator, iid, idx, device='cpu'):
         super().__init__(action_space, ob_generator, reward_generator)
         
@@ -47,8 +47,9 @@ class IDQNAgent(RLAgent):
         self.device = device
         
         self.ob_generator = ob_generator
-        ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
-        self.ob_length = sum(ob_length)
+        ob_length = sum([ob.ob_length for ob in self.ob_generator[0]]) + self.action_space.n
+        
+        self.ob_length = ob_length
 
         self.memory = deque(maxlen=5000)
         self.learning_start = 1000
@@ -72,21 +73,27 @@ class IDQNAgent(RLAgent):
             return self.action_space.sample()
         return self.get_action(ob, phase, relation)
 
-    def get_action(self, ob, phase, relation=None):
+    def get_action(self, ob, oh_phase, relation=None):
         # get all observation now
-        ob_oh = one_hot(phase[self.idx], self.action_space.n)
+        ob_oh = one_hot(oh_phase[self.idx], self.action_space.n)
         obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float().to(self.device)
         act_values = self.model.forward(obs, train=False)
         return torch.argmax(act_values).clone().numpy()
 
     def get_ob(self):
-        return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
+        obs = np.concatenate([ob.generate() for ob in self.ob_generator[0]])
+        return [np.concatenate([ob_g.generate() for ob_g in self.ob_generator[0]]), np.array(self.ob_generator[1].generate())]
 
     def get_delay(self):
         return np.mean(self.ob_generator[2].generate())
 
     def sample(self):
         return self.action_space.sample()
+
+    def get_reward(self):
+        rewards = [r.generate() for r in self.reward_generator]
+        reward = sum(rewards)
+        return reward.squeeze()
 
     def _build_model(self):
         # Neural Net for Deep-Q learning Model
@@ -107,13 +114,13 @@ class IDQNAgent(RLAgent):
         # TODO: check dimension
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
-        # expand action to one_hot
         obs_oh = one_hot(obs[1], self.action_space.n)
         obs = np.concatenate((obs[0], obs_oh), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
         next_obs_oh = one_hot(next_obs[1], self.action_space.n)
         next_obs = np.concatenate((next_obs[0], next_obs_oh), axis=1)
+
         rewards = np.array(rewards_t, copy=False)
         obs = torch.from_numpy(obs).float().to(self.device)
         rewards = torch.from_numpy(rewards).float().to(self.device)
@@ -126,7 +133,8 @@ class IDQNAgent(RLAgent):
         obs, actions, rewards, next_obs = self._encode_sample(minibatch)
         # 4 output 
         out = self.target_model.forward(next_obs, train=False)
-        target = rewards + self.gamma * torch.max(out, dim=1)[0]
+        tmp = self.gamma * torch.max(out, dim=1)[0]
+        target = rewards + tmp
         target_f = self.model.forward(obs, train=False)
         for i, action in enumerate(actions):
             target_f[i][action] = target[i]
