@@ -732,7 +732,7 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
 
 # S-S-O
 def app1_trans_train_hetero(logger, env, agents, episodes, action_interval, state_inference_net, save_rate):
-    # this method is used in approach 1 ,transfer and approach 2, shared-parameter. 
+    # this method is used in approach 1 ,transfer
     logger.info("SHARED FRAP_move - O control")
     total_decision_num = 0
     best_att = np.inf
@@ -757,7 +757,8 @@ def app1_trans_train_hetero(logger, env, agents, episodes, action_interval, stat
                 actions = []
                 for agent_id, agent in enumerate(agents):
                     if total_decision_num > agent.learning_start:
-                        action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
+                        tmp = agent.get_movement_state(recovered_last_states[agent_id])
+                        action = agent.get_action(tmp, last_phases[agent_id], test=False)
                         actions.append(action)
                     else:
                         actions.append(agent.sample())
@@ -822,7 +823,7 @@ def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_in
             actions = []
             delays = []
             for agent_id, agent in enumerate(agents):
-                action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
+                action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id], test=True)
                 delays.append(agent.get_delay())
                 actions.append(action)
             delay_list += np.array(delays)[np.newaxis,:]
@@ -841,9 +842,7 @@ def app1_trans_execute_hetero(logger, env, agents, e, best_att, record, state_in
             recovered_last_lanes = recovered_lanes
             recovered_last_states = recovered_states
     cur_mse = record.get_cur_result()
-    #record.update()
     att = env.eng.get_average_travel_time()
-    cur_mse = record.get_cur_result()
     record.update()
     if att < best_att:
         best_att = att
@@ -1726,7 +1725,7 @@ def app2_shared_train_hetero(logger, env, agents, episodes, action_interval, sta
                 actions = []
                 for agent_id, agent in enumerate(agents):
                     if total_decision_num > agent.learning_start:
-                        actions.append(agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id]))
+                        actions.append(agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id]), test=False)
                     else:
                         actions.append(agent.sample())
                 rewards_list = []
@@ -1809,7 +1808,7 @@ def app2_shared_execute_hetero(logger, env, agents, e, best_att, record, state_i
             actions = []
             delays = []
             for agent_id, agent in enumerate(agents):
-                action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id])
+                action = agent.get_action(agent.get_movement_state(recovered_last_states[agent_id]), last_phases[agent_id], test=True)
                 delay = agent.get_delay()
                 actions.append(action)
                 delays.append(delay)

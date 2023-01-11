@@ -19,7 +19,7 @@ import os
 
 
 REWARD_TYPE = 'NN_st'
-SAVE_RATE = 1
+SAVE_RATE = 5
 EPOCHS = 50
 IN_DIM = 12 + 12
 # if torch.has_cuda:
@@ -37,12 +37,12 @@ parser.add_argument('--config', type=str, default='atlanta1x5', help='network wo
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=100, help='training episodes')
+parser.add_argument('--episodes', type=int, default=200, help='training episodes')
 parser.add_argument('--prefix', default='hetero', type=str)
 parser.add_argument('--debug', action='store_true')
 
-parser.add_argument('--mask_pos', default='3', type=str) # -1 if no mask position
-parser.add_argument('-control', default='S-S-A', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
+parser.add_argument('--mask_pos', default='0', type=str) # -1 if no mask position
+parser.add_argument('-control', default='S-S-O', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
 
 
 if __name__ == "__main__":

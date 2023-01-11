@@ -190,18 +190,18 @@ class FRAP_SH_Agent(RLAgent):
         self.comp_mask = self.relation()
         self.phase2movements = torch.tensor(self.phase2movements).to(torch.int64)
         self.dic_phase_expansion = None
-        self.memory = deque(maxlen=5000) # number of samples
+        self.memory = deque(maxlen=5000) # 5000
         self.memory_with_history = deque(maxlen=5000)
 
         self.learning_start = 2000
         self.update_model_freq = 1
         self.update_target_model_freq = 20
-        self.grad_clip=5.0
-        self.gamma = 0.95  # discount rate
-        self.epsilon = 0.5  # exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.learning_rate = 0.001
+        self.grad_clip=0.5 # 0.5
+        self.gamma = 0.98  # 0.98
+        self.epsilon = 0.5  # 0.5
+        self.epsilon_min = 0.1
+        self.epsilon_decay = 0.999 # 0.999
+        self.learning_rate = 0.001 # 0.001
         self.batch_size = 64
         self.device = device
 
@@ -346,7 +346,7 @@ class FRAP_SH_Agent(RLAgent):
         phase = (np.concatenate(phase)).astype(np.int8)
         return phase
 
-    def get_action(self, ob, phase):
+    def get_action(self, ob, phase, test=True):
         '''
         get_action
         Generate action.
@@ -358,7 +358,9 @@ class FRAP_SH_Agent(RLAgent):
         '''
         if self.phase2movements.shape[0] == 1:
             return np.array(0)
-
+        if not test:
+            if np.random.rand() <= self.epsilon:
+                return self.action_space.sample()
         feature = np.concatenate([phase.reshape(1,-1), ob.reshape(1,-1)], axis=1)
         observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
         actions = self.model(observation, self.phase2movements, self.action_space.n, self.comp_mask, train=False)

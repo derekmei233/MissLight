@@ -237,7 +237,6 @@ class FRAP_DQNAgent(RLAgent):
         if self.phase2movements.shape[0] == 1:
             return np.array(0)
 
-
         feature = np.concatenate([phase.reshape(1,-1), ob.reshape(1,-1)], axis=1)
         observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
         actions = self.model(observation, train=False)
