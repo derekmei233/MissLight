@@ -42,7 +42,7 @@ parser.add_argument('--prefix', default='hetero', type=str)
 parser.add_argument('--debug', action='store_true')
 
 parser.add_argument('--mask_pos', default='0', type=str) # -1 if no mask position
-parser.add_argument('-control', default='S-S-O', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
+parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
 
 
 if __name__ == "__main__":
