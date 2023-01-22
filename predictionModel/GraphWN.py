@@ -28,7 +28,7 @@ class GraphWN_dataset(Dataset):
 def masked_mae(preds, labels, mask):
     loss = torch.abs(preds-labels)
     loss = loss * mask
-    return torch.mean(loss)
+    return torch.sum(loss) / len(torch.where(mask == 1))
 
 
 class GraphWN_predictor(object):
@@ -80,6 +80,7 @@ class GraphWN_predictor(object):
             edge_feature = self.inverse_scale(h)
             # prediction value used later in GraphWN
             loss = self.criterion(edge_feature, y_eval, self.eval_mask)
+            # 1,3,80,1
         impute = edge_feature.to("cpu").numpy().transpose(0,2,1,3).squeeze().squeeze()
         prediction = reconstruct_data_slice(impute, None, relation) # current state
         infer = mask_op_with_truth(y_true_numpy, mask_matrix, adj_matrix, mode)

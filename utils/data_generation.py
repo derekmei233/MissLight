@@ -123,7 +123,7 @@ def build_road_state(raw_state, relation, mask_pos):
         for  id_time, step_dict in enumerate(epoch_state):
             for id_node, node_dict in enumerate(step_dict):
                 obs = node_dict[0]
-                phase = one_hot(node_dict[1], 8)
+                phase = one_hot(node_dict[1].reshape(-1,1), 8)
                 direction = []
                 assert(len(obs)==12), 'only support 3 lanes road in [left, strait, right] order and [N,E,S,W] order'
                 direction.append(np.concatenate([obs[0:3], phase]))

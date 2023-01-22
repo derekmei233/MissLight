@@ -42,7 +42,7 @@ parser.add_argument('--prefix', default='hetero', type=str)
 parser.add_argument('--debug', action='store_true')
 
 parser.add_argument('--mask_pos', default='0', type=str) # -1 if no mask position
-parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
+parser.add_argument('-control', default='F-F', choices=['F-F','I-F','I-M','S-S-A','S-S-O'])
 
 
 if __name__ == "__main__":
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     log_dir = Path.joinpath(cur_working_dir, log_dir)
     replay_dir = Path.joinpath(cur_working_dir, replay_dir)
 
-    dataset_root = Path.joinpath(root_dir, 'I-F')
+    dataset_root = Path.joinpath(root_dir, 'F-F')
     state_dir = Path.joinpath(dataset_root, state_dir)
     reward_model_dir = Path.joinpath(dataset_root, 'model')
 

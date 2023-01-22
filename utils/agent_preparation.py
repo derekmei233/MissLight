@@ -5,6 +5,7 @@ from environment import TSCEnv
 from agent.max_pressure_agent import MaxPressureAgent
 #from agent.sdqn_agent import SDQNAgent, build_shared_model
 from agent.idqn_agent import IDQNAgent
+from agent.sdqn_agent import SDQNAgent, build_shared_model
 from agent.fixedtime_agent import FixedTimeAgent
 from agent.frap_agent import FRAP_DQNAgent
 from agent.frap_shared_agent import FRAP_SH_Agent, build_shared_model2

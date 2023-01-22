@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import torch
 # from .base import BaseGenerator
 
 
@@ -191,7 +192,8 @@ class IntersectionVehicleGenerator():
 
         if self.negative:
             ret = ret * (-1)
-
+        # if type(ret) == torch.Tensor:
+        #     ret = ret.clone().to('cpu')
         return ret
 
 if __name__ == "__main__":

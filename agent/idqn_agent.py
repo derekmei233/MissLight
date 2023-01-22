@@ -74,10 +74,10 @@ class IDQNAgent(RLAgent):
 
     def get_action(self, ob, phase, relation=None):
         # get all observation now
-        ob_oh = one_hot(phase[self.idx], self.action_space.n)
+        ob_oh = one_hot(phase[self.idx].reshape(-1, 1), self.action_space.n)
         obs = torch.tensor(np.concatenate((ob[self.idx], ob_oh))).float().to(self.device)
         act_values = self.model.forward(obs, train=False)
-        return torch.argmax(act_values).clone().numpy()
+        return torch.argmax(act_values).clone().to('cpu').numpy()
 
     def get_ob(self):
         return [self.ob_generator[0].generate(), np.array(self.ob_generator[1].generate())]
@@ -108,11 +108,11 @@ class IDQNAgent(RLAgent):
         obses_t, actions_t, rewards_t, obses_tp1 = list(zip(*minibatch))
         obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_t))]
         # expand action to one_hot
-        obs_oh = one_hot(obs[1], self.action_space.n)
+        obs_oh = one_hot(obs[1].reshape(-1, 1), self.action_space.n)
         obs = np.concatenate((obs[0], obs_oh), axis=1)
         next_obs = [np.squeeze(np.stack(obs_i)) for obs_i in list(zip(*obses_tp1))]
         # expand acton to one_hot
-        next_obs_oh = one_hot(next_obs[1], self.action_space.n)
+        next_obs_oh = one_hot(next_obs[1].reshape(-1, 1), self.action_space.n)
         next_obs = np.concatenate((next_obs[0], next_obs_oh), axis=1)
         rewards = np.array(rewards_t, copy=False)
         obs = torch.from_numpy(obs).float().to(self.device)

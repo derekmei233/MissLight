@@ -330,7 +330,7 @@ def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, 
     states, phases = list(zip(*obs))
     states = np.array(states, dtype=np.float32)
     phases = np.array(phases, dtype=np.int8)
-    recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    recovered, los = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(phases, recovered)
     for i in range(3600):
         if i % action_interval == 0:
@@ -346,7 +346,7 @@ def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, 
             states, phases = list(zip(*obs))
             states = np.array(states, dtype=np.float32)
             phases = np.array(phases, dtype=np.int8)
-            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            recovered,los = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(phases, recovered)
     att = env.eng.get_average_travel_time()
     mse = record.get_cur_result()
@@ -369,7 +369,7 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
         last_states, last_phases = list(zip(*last_obs))
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
-        last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+        last_recovered,loss = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
         record.add(last_states, last_recovered)
         episodes_rewards = [0 for _ in agents]
         i = 0
@@ -407,7 +407,7 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
                 last_states, last_phases = list(zip(*last_obs))
                 last_states = np.array(last_states, dtype=np.float32)
                 last_phases = np.array(last_phases, dtype=np.int32)
-                last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+                last_recovered,loss = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             for agent_id, agent in enumerate(agents):
                 if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
                     agent.replay()
@@ -438,7 +438,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     states, phases = list(zip(*obs))
     states = np.array(states, dtype=np.float32)
     phases = np.array(phases, dtype=np.int8)
-    recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    recovered,loss = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
     delay_list = np.zeros([1, len(agents)])
     count = 0
@@ -467,7 +467,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
             states, phases = list(zip(*obs))
             states = np.array(states, dtype=np.float32)
             phases = np.array(phases, dtype=np.int8)
-            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            recovered,loss = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
 
     cur_mse = record.get_cur_result()
     record.update()
@@ -477,6 +477,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     logger.info(f'delay: {np.array(delay_list) / count}')
+    
     return best_att
 
 # I-M 
@@ -632,7 +633,9 @@ def app1_trans_train(logger, env, agents, episode, action_interval, inference_ne
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         # only recover state_t since we need this var to determine action t
-        last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        last_recovered,los = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+
+
         record.add(last_states, last_recovered)
         episodes_decision_num = 0
         episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
@@ -655,7 +658,8 @@ def app1_trans_train(logger, env, agents, episode, action_interval, inference_ne
                 cur_states, cur_phases = list(zip(*obs))
                 cur_states = np.array(cur_states, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
-                cur_recovered = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                cur_recovered,los = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+
                 record.add(cur_states, cur_recovered)
                 for ag in (agents):
                     for idx in ag.idx:
@@ -695,10 +699,14 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
         env.eng.set_save_replay(False)
     i = 0
     obs = env.reset()
+    impute_loss = 0.0
+    impute_count = 0
     states, phases = list(zip(*env.reset()))
     states = np.array(states, dtype = np.float32)
     phases = np.array(phases, dtype = np.int8)
-    recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    recovered, los = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    impute_loss += los
+    impute_count += 1
     record.add(states, recovered)
     delay_list = np.zeros([1, agents[0].sub_agents])
     count = 0
@@ -717,7 +725,9 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
             states, phases = list(zip(*obs))
             states = np.array(states, dtype = np.float32)
             phases = np.array(phases, dtype = np.int8)
-            recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            recovered,los = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            impute_loss += los
+            impute_count += 1
             record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
@@ -727,6 +737,7 @@ def app1_trans_execute(logger, env, agents, e, best_att, record, inference_net, 
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     logger.info(f'delay: {np.array(delay_list) / count}')
+    logger.info("episode:{}, loss for predict is {}".format(e, impute_loss/impute_count))
     return best_att
 
 
@@ -871,7 +882,7 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
         last_states, last_phases = list(zip(*last_obs))
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
-        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        last_recovered,los = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
         record.add(last_states, last_recovered)
         episodes_decision_num = 0
         episodes_rewards = [0 for _ in agents]
@@ -895,7 +906,7 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
                 rewards = np.mean(rewards_train, axis=1)
                 if reward_type == 'SFM':
                     # TODO: check later 
-                    rewards_predicted = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards_predicted,los = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
                     rewards_recovered = np.mean(rewards_predicted, axis=1)
                     reward_record.add(rewards, rewards_recovered)
                 elif reward_type == 'NN_st':
@@ -918,7 +929,7 @@ def app2_conc_train(logger, env, agents, episode, action_interval, state_inferen
                 cur_states, cur_phases = list(zip(*obs))
                 cur_states = np.array(cur_states, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
-                cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                cur_recovered,los = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
                 record.add(cur_states, cur_recovered)
                 for agent_id, agent in enumerate(agents):
                     agent.remember(
@@ -1094,7 +1105,7 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
     states, phases = list(zip(*obs))
     states = np.array(states, dtype = np.float32)
     phases = np.array(phases, dtype = np.int8)
-    recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    recovered,los = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
     delay_list = np.zeros([1, len(agents)])
     count = 0
@@ -1116,7 +1127,7 @@ def app2_conc_execute(logger, env, agents, e, best_att, record, state_inference_
             states, phases = list(zip(*obs))
             states = np.array(states, dtype = np.float32)
             phases = np.array(phases, dtype = np.int8)
-            recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            recovered,los = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
@@ -1150,7 +1161,7 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         # only recover state_t since we need this var to determine action t
-        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        last_recovered,los = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
         record.add(last_states, last_recovered)
         episodes_decision_num = 0
         episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
@@ -1170,7 +1181,7 @@ def app2_shared_train(logger, env, agents, episode, action_interval, state_infer
                 rewards_train = np.mean(rewards_list, axis=0)
                 rewards = np.mean(rewards_train, axis=1)
                 if reward_type == 'SFM':
-                    rewards_predicted = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards_predicted,los = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
                     rewards_recovered = np.mean(rewards_predicted, axis=1)
                     reward_record.add(rewards, rewards_recovered)
                 elif reward_type == 'NN_st':
@@ -1235,11 +1246,14 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
     else:
         env.eng.set_save_replay(False)
     i = 0
+
     obs = env.reset()
+    impute_loss = 0.0
+    impute_count = 0
     states, phases = list(zip(*env.reset()))
     states = np.array(states, dtype = np.float32)
     phases = np.array(phases, dtype = np.int8)
-    recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+    recovered,los = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
     record.add(states, recovered)
     delay_list = np.zeros([1, agents[0].sub_agents])
     count = 0
@@ -1259,7 +1273,7 @@ def app2_shared_execute(logger, env, agents, e, best_att, record, state_inferenc
             states, phases = list(zip(*obs))
             states = np.array(states, dtype = np.float32)
             phases = np.array(phases, dtype = np.int8)
-            recovered = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+            recovered,los = state_inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
             record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
@@ -1289,7 +1303,7 @@ def model_based_shared_train(logger, env, agents, episode, action_interval, stat
         last_states = np.array(last_states, dtype=np.float32)
         last_phases = np.array(last_phases, dtype=np.int8)
         # only recover state_t since we need this var to determine action t
-        last_recovered = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+        last_recovered,los = state_inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
         record.add(last_states, last_recovered)
         episodes_decision_num = 0
         episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
@@ -1322,7 +1336,7 @@ def model_based_shared_train(logger, env, agents, episode, action_interval, stat
                 cur_states, cur_phases = list(zip(*obs))
                 cur_states = np.array(cur_states, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
-                cur_recovered = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                cur_recovered,los = state_inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
                 record.add(cur_states, cur_recovered)
                 for ag in agents:
                     for idx in ag.idx:
@@ -1451,7 +1465,7 @@ def app2_shared_train_v2(logger, env, agents, episode, action_interval, state_in
                 rewards_train = np.mean(rewards_list, axis=0)
                 rewards = np.mean(rewards_train, axis=1)
                 if reward_type == 'SFM':
-                    rewards_predicted = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
+                    rewards_predicted,los = reward_inference_net.predict(rewards_train, None, relation, mask_pos, mask_matrix, adj_matrix)
                     rewards_recovered = np.mean(rewards_predicted, axis=1)
                     reward_record.add(rewards, rewards_recovered)
                 elif reward_type == 'NN_st':
@@ -1571,7 +1585,7 @@ def app2_shared_execute_v2(logger, env, agents, e, best_att, record, state_infer
     if att < best_att:
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
-    #logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     logger.info("episode:{}, loss for predict is {}".format(e, impute_loss/impute_count))
     return best_att
 
@@ -1584,6 +1598,8 @@ def app1_trans_train_v2(logger, env, agents, episode, action_interval, inference
     imputation_method = inference_net.name
     state_buffer = full_traj_buffer(t_history)
     for e in range(episode):
+        impute_loss = 0.0
+        impute_count = 0
         state_buffer.clear()
         last_obs = env.reset()
         last_states, last_phases = list(zip(*last_obs))
@@ -1592,9 +1608,11 @@ def app1_trans_train_v2(logger, env, agents, episode, action_interval, inference
         # only recover state_t since we need this var to determine action t
         if imputation_method == 'SFM_predictor':
             # TODO: forward test
-            last_recovered = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+            last_recovered, los = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix)
+            impute_loss += los
+            impute_count += 1
         elif imputation_method == 'GraphWN_predictor':
-            last_recovered = inference_net.predict(state_buffer, last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+            last_recovered, los = inference_net.predict(state_buffer, last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
         record.add(last_states, last_recovered)
         episodes_decision_num = 0
         episodes_rewards = [0 for _ in range(agents[0].sub_agents)]
@@ -1618,9 +1636,9 @@ def app1_trans_train_v2(logger, env, agents, episode, action_interval, inference
                 cur_states = np.array(cur_states, dtype=np.float32)
                 cur_phases = np.array(cur_phases, dtype=np.int8)
                 if imputation_method == 'SFM_predictor':
-                    cur_recovered = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
+                    cur_recovered, los = inference_net.predict(cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix)
                 elif imputation_method == 'GraphWN_predictor':
-                    cur_recovered = inference_net.predict(state_buffer, cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                    cur_recovered, los = inference_net.predict(state_buffer, cur_states, cur_phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
                 record.add(cur_states, cur_recovered)
                 for ag in (agents):
                     for idx in ag.idx:
@@ -1661,15 +1679,21 @@ def app1_trans_execute_v2(logger, env, agents, e, best_att, record, inference_ne
     i = 0
     state_buffer.clear()
     obs = env.reset()
+    impute_loss = 0.0
+    impute_count = 0
     imputation_method = inference_net.name
     states, phases = list(zip(*env.reset()))
     states = np.array(states, dtype = np.float32)
     phases = np.array(phases, dtype = np.int8)
     if imputation_method == 'SFM_predictor':
         # TODO: forward test
-        recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
+        recovered, los = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
+        impute_loss += los
+        impute_count += 1
     elif imputation_method == 'GraphWN_predictor':
-        recovered = inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+        recovered, los = inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+        impute_loss += los
+        impute_count += 1
     record.add(states, recovered)
     while i < 3600:
         if i % action_interval == 0:
@@ -1685,9 +1709,13 @@ def app1_trans_execute_v2(logger, env, agents, e, best_att, record, inference_ne
             phases = np.array(phases, dtype = np.int8)
             if imputation_method == 'SFM_predictor':
                 # TODO: forward test
-                recovered = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
+                recovered, los = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix)
+                impute_loss += los
+                impute_count += 1
             elif imputation_method == 'GraphWN_predictor':
-                recovered = inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                recovered, los = inference_net.predict(state_buffer, states, phases, relation, mask_pos, mask_matrix, adj_matrix, mode='select')
+                impute_loss += los
+                impute_count += 1
             record.add(states, recovered)
     att = env.eng.get_average_travel_time()
     cur_mse = record.get_cur_result()
@@ -1696,6 +1724,7 @@ def app1_trans_execute_v2(logger, env, agents, e, best_att, record, inference_ne
         best_att = att
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
+    logger.info("episode:{}, loss for predict is {}".format(e, impute_loss/impute_count))
     return best_att
 
 # S-S-A hetero
@@ -1934,7 +1963,8 @@ def model_based_shared_train_v2(logger, env, agents, episode, action_interval, s
             # transition model (reward model in our case) training starts here
             x, target = agents[0].get_latest_sample()
             reward_inference_net.train_while_control(x, target)
-            state_inference_net.train_while_control(state_buffer, cur_states, cur_phases, relation, mask_pos)
+            # if imputation_method == 'GraphWN_predictor':
+            #     state_inference_net.train_while_control(state_buffer, cur_states, cur_phases, relation, mask_pos)
             # TODO: try action later
             for ag in agents:
                 # only use experiences at observable intersections

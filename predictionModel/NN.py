@@ -54,8 +54,8 @@ class NN_predictor(object):
             for i, data in enumerate(train_loader):
                 x, y_true = data
                 self.optimizer.zero_grad()
-                x.to(self.DEVICE)
-                y_true.to(self.DEVICE)
+                x = x.to(self.DEVICE)
+                y_true = y_true.to(self.DEVICE)
                 y_pred = self.model(x)
                 loss = self.criterion(y_pred, torch.unsqueeze(y_true, dim=-1))
                 loss.backward()
@@ -65,8 +65,8 @@ class NN_predictor(object):
             with no_grad():
                 for i, data in enumerate(test_loader):
                     x, y_true = data
-                    x.to(self.DEVICE)
-                    y_true.to(self.DEVICE)
+                    x = x.to(self.DEVICE)
+                    y_true = y_true.to(self.DEVICE)
                     y_pred = self.model(x)
                     loss = self.criterion(y_pred, torch.unsqueeze(y_true, dim=-1))
                     test_loss += loss.item()

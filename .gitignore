@@ -8,7 +8,7 @@ log/
 local/
 experiments/
 roadgraph/
-result/*
+result/
 data/frontend/
 venv/
 data/replay_dir/
