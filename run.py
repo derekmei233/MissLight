@@ -19,8 +19,8 @@ import torch
 
 
 REWARD_TYPE = 'NN_st'
-SAVE_RATE = 1
-EPOCHS = 10
+SAVE_RATE = 5
+EPOCHS = 50
 HISTORY_LENGTH = 12 # GraphWN should change block and layer accordingly
 IN_DIM = {'NN_st': 20, 'NN_stp': 12, 'NN_sta': 20}
 if torch.has_cuda:
@@ -38,7 +38,7 @@ parser.add_argument('--config', type=str, default='hz4x4', help='network working
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=20, help='training episodes')
+parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
 parser.add_argument('-impute', default='sfm', choices=['sfm', 'gwn'])
 parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'])
