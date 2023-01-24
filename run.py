@@ -20,7 +20,7 @@ import torch
 
 REWARD_TYPE = 'NN_st'
 SAVE_RATE = 5
-EPOCHS = 30
+EPOCHS = 50
 HISTORY_LENGTH = 12 # GraphWN should change block and layer accordingly
 IN_DIM = {'NN_st': 20, 'NN_stp': 12, 'NN_sta': 20}
 # if torch.has_cuda:
@@ -39,11 +39,11 @@ parser.add_argument('--config', type=str, default='hz4x4', help='network working
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=40, help='training episodes')
+parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
 parser.add_argument('-impute', default='gwn', choices=['sfm', 'gwn'])
 parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'])
-parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
+parser.add_argument('-control', default='I-M', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
 parser.add_argument('--prefix', default='1,7,15', type=str)
 
 parser.add_argument('--debug', action='store_true')
