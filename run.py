@@ -23,14 +23,16 @@ SAVE_RATE = 5
 EPOCHS = 50
 HISTORY_LENGTH = 12 # GraphWN should change block and layer accordingly
 IN_DIM = {'NN_st': 20, 'NN_stp': 12, 'NN_sta': 20}
-# if torch.has_cuda:
-#     INFER_DEVICE = torch.device('cuda')
-# elif torch.has_mps:
-#     INFER_DEVICE = torch.device('mps')
-# else:
-#     INFER_DEVICE = torch.device('cpu')
+if torch.has_cuda:
+    INFER_DEVICE = torch.device('cuda')
+elif torch.has_mps:
+    INFER_DEVICE = torch.device('mps')
+else:
+    INFER_DEVICE = torch.device('cpu')
 DEVICE = torch.device('cpu')
-INFER_DEVICE = torch.device('cpu')
+# INFER_DEVICE = torch.device('cpu')
+
+# mps may be problematic in training GraphWN.
 
 # TODO: test on different reward impute(t or pt) first
 # TODO: var = [Imputation/Agent/Control/prefix]

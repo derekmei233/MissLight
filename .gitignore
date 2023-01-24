@@ -17,3 +17,4 @@ data/output_data
 *.out
 *.sh
 *.ipynb
+*.pdf

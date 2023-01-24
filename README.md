@@ -2,12 +2,12 @@
 
 ## Configure environment
 
-Dependencies
+### Dependencies
 ```
 pip install -r requirements.txt
 ```
 
-cityflow
+### CityFlow
 ```
 git clone https://github.com/cityflow-project/CityFlow.git
 pip install .
