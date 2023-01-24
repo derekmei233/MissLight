@@ -19,7 +19,7 @@ class SFM_dataset(Dataset):
 def masked_mae(preds, labels, mask):
     loss = np.abs(preds-labels)
     loss = loss * mask
-    return np.sum(loss) / len(np.where(mask == 1))
+    return np.mean(loss)
 
 
 class SFM_predictor(object):

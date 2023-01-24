@@ -1969,7 +1969,7 @@ def model_based_shared_train_v2(logger, env, agents, episode, action_interval, s
             for ag in agents:
                 # only use experiences at observable intersections
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
-                    ag.replay_img_v2(reward_inference_net, state_inference_net, update_times, relation, mask_pos)
+                    ag.replay_img(reward_inference_net, state_inference_net, update_times, relation, mask_pos)
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
                     ag.update_target_network()
         cur_mse = record.get_cur_result()

@@ -28,7 +28,7 @@ class GraphWN_dataset(Dataset):
 def masked_mae(preds, labels, mask):
     loss = torch.abs(preds-labels)
     loss = loss * mask
-    return torch.sum(loss) / len(torch.where(mask == 1))
+    return torch.mean(loss)
 
 
 class GraphWN_predictor(object):
@@ -49,7 +49,7 @@ class GraphWN_predictor(object):
         self.reserve_mask = np.where(node_update != 2,1,0)[:, np.newaxis].repeat(3, axis=1)
         self.eval_mask = torch.from_numpy(np.where(node_update == 2,1,0)[:, np.newaxis].repeat(3, axis=1)).T[np.newaxis,:,:,np.newaxis].float().to(self.DEVICE)
         self.criterion = masked_mae
-        self.learning_rate = 0.001
+        self.learning_rate = 0.01
         self.batch_size = 64
         self.decay = 0.0001
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=self.decay)
