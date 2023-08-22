@@ -4,7 +4,6 @@ from metric.maskMetric import MSEMetric
 
 from utils.preparation import one_hot
 from utils.data_generation import store_reshaped_data, store_reshaped_data_hetero, time_helper
-
 import os
 from pathlib import Path
 from tqdm import tqdm
@@ -16,10 +15,10 @@ import torch
 
 # F-F
 def fixedtime_execute(logger, env, agents, action_interval):
-    env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
-    save_dir = name[name.index('output_data'): name.index('logging')]
-    env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_0.txt"))
+    save_dir = Path(name[name.index('output_data'): name.index('logging')])
+    env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "-1.txt"))
+
     logger.info(f"FixedTime - FixedTime control")
     i = 0
     obs = env.reset()

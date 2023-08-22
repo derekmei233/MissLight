@@ -30,12 +30,13 @@ elif torch.has_mps:
 else:
     INFER_DEVICE = torch.device('cpu')
 DEVICE = torch.device('cpu')
-# INFER_DEVICE = torch.device('cpu')
+
 
 # mps may be problematic in training GraphWN.
 
 # TODO: test on different reward impute(t or pt) first
 # TODO: var = [Imputation/Agent/Control/prefix]
+
 parser = argparse.ArgumentParser(description='IDQN - FixedTime generate dataset for reward inference model')
 parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
 
@@ -43,26 +44,25 @@ parser.add_argument('--action_interval', type=int, default=10, help='how often a
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
 parser.add_argument('--episodes', type=int, default=100, help='training episodes')
 
-parser.add_argument('-impute', default='gwn', choices=['sfm', 'gwn'])
-parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'])
-parser.add_argument('-control', default='I-M', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
-parser.add_argument('--prefix', default='1,7,15', type=str)
+parser.add_argument('-impute', default='sfm', choices=['sfm', 'gwn'])
+parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'], help='test on flexible agents FRAP')
+parser.add_argument('-control', default='F-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
+parser.add_argument('--prefix', default='1,7,15', type=str, help='')
 
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--mask_pos', default='1,7,15', type=str)
 
 
 if __name__ == "__main__":
-    # save replay if debug == True, default False
+    # Prepare configuration for this run
     args = parser.parse_args()
     config = args.config
     saveReplay = True if args.debug else False
-
-    config_file = f'cityflow_{config}.cfg'
+    config_file = f'configs/cityflow_{config}.cfg'
     action_interval = args.action_interval
     episodes = args.episodes
 
-    # prepare working directory
+    # Working directory preparation start here
     model_dir = 'model'
     state_dir = 'dataset'
     replay_dir = 'replay'
@@ -74,12 +74,11 @@ if __name__ == "__main__":
     log_dir = Path.joinpath(cur_working_dir, log_dir)
     replay_dir = Path.joinpath(cur_working_dir, replay_dir)
 
+    # Saving simulation data of I-F and stored for later use by other control method under same setting
     dataset_root = Path.joinpath(root_dir, 'sfm', args.agent, 'I-F')
-    # state dir is set under sfm method
     state_dir = Path.joinpath(dataset_root, state_dir)
     reward_model_dir = Path.joinpath(dataset_root, 'model')
     state_model_dir = Path.joinpath(dataset_root, 'model')
-
     if not Path.exists(model_dir):
         model_dir.mkdir(parents=True)
     if not Path.exists(state_dir):
@@ -89,40 +88,44 @@ if __name__ == "__main__":
     if not Path.exists(replay_dir):
         replay_dir.mkdir(parents=True)
 
-    # working dir preparation finished, file preparation start
+    # File preparation start here
     logger = logging.getLogger('main')
     logger.setLevel(logging.DEBUG)
     fh = logging.FileHandler(Path.joinpath(
     log_dir, datetime.now().strftime('%Y_%m_%d-%H_%M_%S') + ".log"))
     fh.setLevel(logging.DEBUG)
-    #sh = logging.StreamHandler()
-    #sh.setLevel(logging.INFO)
     logger.addHandler(fh)
-    #logger.addHandler(sh)
     save_reward_file = Path.joinpath(state_dir, f'state_reward.pkl')
     save_state_file = Path.joinpath(state_dir, f'state_phase.pkl')
     save_state_dataset = Path.joinpath(state_dir, f'state_dataset.npy')
     graphwn_dataset = Path.joinpath(state_dir, f'masked_graphwn_dataset.pkl')
-
     if saveReplay:
         config_file = fork_config(config_file, str(replay_dir))
 
-    # create world and relationship of intersections
+    # Create world configuration
     world = create_world(config_file)
-    relation = build_relation(world) # no need to reset this while creating new environment since we only need the relationship not object.
+    relation = build_relation(world) # Create world to extract intersections relationship. 
+
+    # Pick missing positions
     if args.mask_pos == '':
         mask_pos=[]
-        #mask_pos = random_mask(3, 'non_neighbor', relation)
     else:
         mask_pos = args.mask_pos.split(',')
         mask_pos = [int(i) for i in mask_pos]
+
     logger.info(f"mask_pos: {mask_pos}")
 
-    if args.control == 'I-F':
+    if args.control =='F-F':
+        # Conventional control method 1: Unobs - Fixedtime, Obs - Fixedtime
+        agents = create_fixedtime_agents(world, time=args.fix_time)
+        env = create_env(world, agents)
+        fixedtime_execute(logger, env, agents, action_interval)
+
+    elif args.control == 'I-F':
+        # Unobserved == Fixedtime, Observed == IDQN
         gen_agents = create_preparation_agents(world, mask_pos,time=args.fix_time,agent=args.agent, device=DEVICE)
         env = create_env(world, gen_agents)
-        # environment preparation, in_dim == 20 [lanes:3 * roads:4 + phases:8] = 20
-        input_dim = 20
+        # environment preparation, in_dim == 20 [lanes:3 * roads:4 + phases:8] = 20, this is default configuration for intersections used by most TSC publications
 
         if not Path.exists(save_reward_file):
             print('start test nn predictor \n')
@@ -144,7 +147,7 @@ if __name__ == "__main__":
                 np.save(f, state_info['adj_road'])
         reward_dataset = generate_reward_dataset(save_reward_file, 8, infer=REWARD_TYPE) # default setting infer == 'st'
         #state_dataset = generate_state_dataset()
-        net = NN_predictor(input_dim, 1, DEVICE, state_model_dir, REWARD_TYPE) # generate reward inference model at model_dir
+        net = NN_predictor(IN_DIM, 1, DEVICE, state_model_dir, REWARD_TYPE) # generate reward inference model at model_dir
         if not net.is_mode():
             net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
         else:
@@ -160,11 +163,6 @@ if __name__ == "__main__":
             state_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, INFER_DEVICE, state_model_dir)
             if not state_net.is_model():
                 state_net.train(data['train']['x'], data['train']['target'], data['val']['x'], data['val']['target'], EPOCHS) # TODO: 3 for debug
-
-    elif args.control =='F-F':
-        agents = create_fixedtime_agents(world, time=args.fix_time)
-        env = create_env(world, agents)
-        fixedtime_execute(logger, env, agents, action_interval, relation)
 
     elif args.control == 'M-M':
         agents = create_maxp_agents(world)

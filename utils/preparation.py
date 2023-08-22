@@ -15,7 +15,7 @@ def fork_config(load_file, save_dir):
     # change .cfg settings according to the shell inputs
     with open(load_file) as f:
         contents = json.load(f)
-    save_file = os.path.join(save_dir, load_file)
+    save_file = os.path.join(save_dir, load_file.split('/')[-1])
     contents['saveReplay'] = True
     contents['roadnetLogFile'] = os.path.join(save_dir.lstrip('data/'), contents['roadnetLogFile'].split('/')[-1])
     contents['replayLogFile'] = os.path.join(save_dir.lstrip('data/'), contents['replayLogFile'].split('/')[-1])
