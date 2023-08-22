@@ -7,6 +7,7 @@
 pip install -r requirements.txt
 ```
 
+<<<<<<< HEAD
 ### CityFlow
 ```
 git clone https://github.com/cityflow-project/CityFlow.git
