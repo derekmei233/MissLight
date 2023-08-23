@@ -42,11 +42,11 @@ parser.add_argument('--config', type=str, default='hz4x4', help='network working
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
-parser.add_argument('--episodes', type=int, default=100, help='training episodes')
+parser.add_argument('--episodes', type=int, default=10, help='training episodes')
 
 parser.add_argument('-impute', default='sfm', choices=['sfm', 'gwn'])
 parser.add_argument('-agent', default='DQN',choices=['DQN','FRAP'], help='test on flexible agents FRAP')
-parser.add_argument('-control', default='F-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
+parser.add_argument('-control', default='I-F', choices=['F-F','I-F','I-M','M-M','S-S-A','S-S-O', 'I-I', 'S-S-O-model_based'])
 parser.add_argument('--prefix', default='1,7,15', type=str, help='')
 
 parser.add_argument('--debug', action='store_true')
@@ -122,37 +122,37 @@ if __name__ == "__main__":
         fixedtime_execute(logger, env, agents, action_interval)
 
     elif args.control == 'I-F':
-        # Unobserved == Fixedtime, Observed == IDQN
+        # Conventional control method 2 naive appraoch: Unobs - Fixedtime, Obs - IDQN
         gen_agents = create_preparation_agents(world, mask_pos,time=args.fix_time,agent=args.agent, device=DEVICE)
         env = create_env(world, gen_agents)
-        # environment preparation, in_dim == 20 [lanes:3 * roads:4 + phases:8] = 20, this is default configuration for intersections used by most TSC publications
 
         if not Path.exists(save_reward_file):
             print('start test nn predictor \n')
+            # Generate state reward pairs for later state model (GraphWN) and reward model (Neural Network) training
             reward_info, raw_state = naive_train(logger, env, gen_agents, episodes, action_interval, save_rate=SAVE_RATE,agent_name=args.agent)
-            # save inference training raw data
-            with open(save_reward_file, 'wb') as f:
+            # save reward training raw data
+-            with open(save_reward_file, 'wb') as f:
                 pkl.dump(reward_info, f)
-            # save raw_state data
+            # save state training data
             with open(save_state_file, 'wb') as f:
                 pkl.dump(raw_state, f)
         if not Path.exists(save_state_dataset):
             with open(save_state_file, 'rb') as f:
                 c = pkl.load(f)
-            raw_state = c
+            raw_state = c 
             state_info = build_road_state(raw_state, relation, mask_pos) # save road level data and mask information
             with open(save_state_dataset, 'wb') as f:
                 np.save(f, state_info['road_feature'])
                 np.save(f, state_info['road_update'])
                 np.save(f, state_info['adj_road'])
         reward_dataset = generate_reward_dataset(save_reward_file, 8, infer=REWARD_TYPE) # default setting infer == 'st'
-        #state_dataset = generate_state_dataset()
-        net = NN_predictor(IN_DIM, 1, DEVICE, state_model_dir, REWARD_TYPE) # generate reward inference model at model_dir
-        if not net.is_mode():
+        # Train reward inference model
+        net = NN_predictor(IN_DIM[REWARD_TYPE], 1, DEVICE, reward_model_dir, REWARD_TYPE) # generate reward inference model at model_dir
+        if not net.is_model():
             net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
         else:
             net.load_model()
-
+        # TODO: clean gwn branch in next version
         if args.impute == "gwn":
             adj_matrix, phase_adj = get_road_adj_phase(relation)
             data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')

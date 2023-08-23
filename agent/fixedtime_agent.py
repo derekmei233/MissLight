@@ -31,7 +31,7 @@ class FixedTimeAgent(BaseAgent):
         return self.ob_generator[0].world.eng.get_current_time()
     
     def get_ob(self):
-        return [np.zeros((12)), np.array(0)]
+        return [np.zeros((12)), np.array([0])]
 
     def get_delay(self):
         return np.mean(self.ob_generator[2].generate())

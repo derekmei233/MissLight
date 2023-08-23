@@ -109,7 +109,7 @@ class NN_predictor(object):
         model_name = os.path.join(self.model_dir, name)
         torch.save(self.model.state_dict(), model_name)
     
-    def is_mode(self):
+    def is_model(self):
         name = f"NN_inference_{self.reward_type}.pt"
         model_name = os.path.join(self.model_dir, name)
         return os.path.isfile(model_name)

@@ -12,12 +12,9 @@ from torch.nn.utils import clip_grad_norm_
 from copy import deepcopy
 
 
-
 class FRAP_DQNAgent(RLAgent):
     def __init__(self, action_space, ob_generator,reward_generator, iid, idx,device):
         super(FRAP_DQNAgent,self).__init__(action_space, ob_generator,reward_generator)
-        #self.dic_agent_conf = Registry.mapping['model_mapping']['model_setting']
-        #self.dic_traffic_env_conf = Registry.mapping['world_mapping']['traffic_setting']
 
         self.learning_start = 2000
         self.update_model_freq = 1
@@ -45,9 +42,7 @@ class FRAP_DQNAgent(RLAgent):
         assert self.phase is True
         self.one_hot = False
         assert self.one_hot is False
-        # get generator for each Agent
-        #self.inter_id = self.world.intersection_ids[self.rank]
-        #self.inter_obj = self.world.id2intersection[self.inter_id]
+
         self.action_space = action_space
         self.ob_generator = ob_generator
         self.world = self.ob_generator[0].world
@@ -73,20 +68,7 @@ class FRAP_DQNAgent(RLAgent):
 
 
         self.ob_length = sum(ob_length)
-        #self.phase_generator = phase_generator
         self.reward_generator = reward_generator
-
-        #self.queue = LaneVehicleGenerator(self.world, self.inter_obj,
-                                          #["lane_waiting_count"], in_only=True,
-                                          #negative=False)
-        #self.delay = LaneVehicleGenerator(self.world, self.inter_obj,
-                                          #["lane_delay"], in_only=True, average="all",
-                                          #negative=False)
-
-        # if self.phase:
-        #     if self.one_hot:
-        #         if self.ob_generator.ob_length == 8:
-        #             self.dic_phase_expansion = self.dic_traffic_env_conf.param["phase_expansion_8"]
 
         self.model = self._build_model()
         self.target_model = self._build_model()
@@ -275,8 +257,6 @@ class FRAP_DQNAgent(RLAgent):
         # (batch_size,12)
         obs_t_all=[item[0] for item in samples] # last_obs(batch, 1, lane_num)
         obs_tp_all=[item[4] for item in samples] # cur_obs
-        # obs_t = [utils.remove_right_lane(x) for x in obs_t_all]
-        # obs_tp = [utils.remove_right_lane(x) for x in obs_tp_all]
         obs_t = obs_t_all
         obs_tp = obs_tp_all
         obs_t = np.concatenate(obs_t) # (batch,lane_num)
@@ -383,35 +363,10 @@ class FRAP_move(nn.Module):
         acts = states[:, :1].to(torch.int64)
         states = states[:, 1:].unsqueeze(1).repeat(1,self.phase2movements.shape[0], 1)
         states = states.float()
-
-        # Expand action index to mark demand input indices
         extended_acts = []
-        # for i in range(batch_size):
-        # # index of phase
-        #     act_idx = acts[i]
-        #     connectivity = self.phase2movements[act_idx]
-        #     extended_acts = torch.stack(connectivity)
-        # phase_embeds = torch.sigmoid(self.p(extended_acts))
 
         connectivity = self.phase2movements[acts]
         phase_embeds = torch.sigmoid(self.p(connectivity)) # [B, 4, 3, 12]
-
-
-        # if num_movements == 12:
-        #     order_lane = [0,1,3,4,6,7,9,10] # remove turning_right phase
-        # else:
-        #     order_lane = [i for i in range(num_movements)]
-        # for idx, i in enumerate(order_lane):
-
-        # for i in range(num_movements):
-        #     # phase = phase_embeds[:, idx]  # size 4
-        #     phase = phase_embeds[:, i]  # size 4
-        #     demand = states[:, i:i+self.demand_shape]
-        #     demand = torch.sigmoid(self.d(demand))    # size 4
-        #     phase_demand = torch.cat((phase, demand), -1)
-        #     phase_demand_embed = F.relu(self.lane_embedding(phase_demand))
-        #     phase_demands.append(phase_demand_embed)
-        # phase_demands = torch.stack(phase_demands, 1)
 
         all_phase_demand = states * self.phase2movements # [B, 3, 12] - checked
         all_phase_demand = torch.sigmoid(self.d(all_phase_demand.unsqueeze(-1))) # [B, 3, 12, 4] - checked
@@ -427,21 +382,6 @@ class FRAP_move(nn.Module):
                                        (batch_size, self.oshape, self.oshape - 1, 2 * self.lane_embed_units)) # [B, 3, 2, 32]
         rotated_phases = rotated_phases.permute(0, 3, 1, 2)  # [B, 32, 3, 2]
         rotated_phases = F.relu(self.lane_conv(rotated_phases)) # [B, 20, 3, 2]
-        # pairs = []
-        # for pair in self.phase_pairs:
-        #     pairs.append(phase_demands[:, pair[0]] + phase_demands[:, pair[1]])
-        
-
-
-        # rotated_phases = []
-        # for i in range(len(pairs)):
-        #     for j in range(len(pairs)):
-        #         if i != j: rotated_phases.append(torch.cat((pairs[i], pairs[j]), -1))
-        # rotated_phases = torch.stack(rotated_phases, 1)
-        # rotated_phases = torch.reshape(rotated_phases,
-        #                                (batch_size, self.oshape, self.oshape - 1, 2 * self.lane_embed_units)) # [B, 3, 2, 16]
-        # rotated_phases = rotated_phases.permute(0, 3, 1, 2)  # Move channels up
-        # rotated_phases = F.relu(self.lane_conv(rotated_phases))  # Conv-20x1x1  pair demand representation
 
         # Phase competition mask
         competition_mask = self.comp_mask.repeat((batch_size, 1, 1)) # [B, 3, 2]

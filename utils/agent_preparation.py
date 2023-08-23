@@ -36,7 +36,7 @@ def create_fixedtime_agents(world, time=30):
         ))
     return agents
 
-def create_preparation_agents(world, mask_pos,time,agent, device):
+def create_preparation_agents(world, mask_pos, time, agent, device):
     agents = []
     if (agent=='DQN'):
         New_Agent=IDQNAgent
