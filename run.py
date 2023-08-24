@@ -38,7 +38,7 @@ DEVICE = torch.device('cpu')
 # TODO: var = [Imputation/Agent/Control/prefix]
 
 parser = argparse.ArgumentParser(description='IDQN - FixedTime generate dataset for reward inference model')
-parser.add_argument('--config', type=str, default='hz4x4', help='network working on')
+parser.add_argument('--config', type=str, default='syn4x4', help='network working on')
 
 parser.add_argument('--action_interval', type=int, default=10, help='how often agent make decisions')
 parser.add_argument('--fix_time', type=int, default=40, help='how often fixtime agent change phase')
@@ -61,21 +61,26 @@ if __name__ == "__main__":
     config_file = f'configs/cityflow_{config}.cfg'
     action_interval = args.action_interval
     episodes = args.episodes
+    fixed = args.fix_time
+    agent_type = args.agent
+    prefix = args.prefix
+    control = args.control
+    imputation = args.impute
 
     # Working directory preparation start here
     model_dir = 'model'
     state_dir = 'dataset'
     replay_dir = 'replay'
     log_dir = 'logging'
-    param_dir = Path.joinpath(Path(args.impute), args.agent, args.control)
-    root_dir = Path.joinpath(Path('data/output_data'), args.config, args.prefix)
+    param_dir = Path.joinpath(Path(imputation), agent_type, control)
+    root_dir = Path.joinpath(Path('data/output_data'), config, prefix)
     cur_working_dir = Path.joinpath(root_dir, param_dir)
     model_dir = Path.joinpath(cur_working_dir, model_dir)
     log_dir = Path.joinpath(cur_working_dir, log_dir)
     replay_dir = Path.joinpath(cur_working_dir, replay_dir)
 
     # Saving simulation data of I-F and stored for later use by other control method under same setting
-    dataset_root = Path.joinpath(root_dir, 'sfm', args.agent, 'I-F')
+    dataset_root = Path.joinpath(root_dir, 'sfm', agent_type, 'I-F')
     state_dir = Path.joinpath(dataset_root, state_dir)
     reward_model_dir = Path.joinpath(dataset_root, 'model')
     state_model_dir = Path.joinpath(dataset_root, 'model')
@@ -115,23 +120,23 @@ if __name__ == "__main__":
 
     logger.info(f"mask_pos: {mask_pos}")
 
-    if args.control =='F-F':
+    if control =='F-F':
         # Conventional control method 1: Unobs - Fixedtime, Obs - Fixedtime
-        agents = create_fixedtime_agents(world, time=args.fix_time)
+        agents = create_fixedtime_agents(world, time=fixed)
         env = create_env(world, agents)
         fixedtime_execute(logger, env, agents, action_interval)
 
-    elif args.control == 'I-F':
+    elif control == 'I-F':
         # Conventional control method 2 naive appraoch: Unobs - Fixedtime, Obs - IDQN
-        gen_agents = create_preparation_agents(world, mask_pos,time=args.fix_time,agent=args.agent, device=DEVICE)
+        gen_agents = create_preparation_agents(world, mask_pos, fixed, agent_type, DEVICE)
         env = create_env(world, gen_agents)
 
         if not Path.exists(save_reward_file):
             print('start test nn predictor \n')
             # Generate state reward pairs for later state model (GraphWN) and reward model (Neural Network) training
-            reward_info, raw_state = naive_train(logger, env, gen_agents, episodes, action_interval, save_rate=SAVE_RATE,agent_name=args.agent)
+            reward_info, raw_state = naive_train(logger, env, gen_agents, episodes, action_interval, SAVE_RATE, agent_type)
             # save reward training raw data
--            with open(save_reward_file, 'wb') as f:
+            with open(save_reward_file, 'wb') as f:
                 pkl.dump(reward_info, f)
             # save state training data
             with open(save_state_file, 'wb') as f:
@@ -152,19 +157,19 @@ if __name__ == "__main__":
             net.train(reward_dataset['x_train'], reward_dataset['y_train'], reward_dataset['x_test'], reward_dataset['y_test'], epochs=EPOCHS)
         else:
             net.load_model()
-        # TODO: clean gwn branch in next version
-        if args.impute == "gwn":
+        if imputation == "gwn":
+            # TODO: clean gwn branch in next version
             adj_matrix, phase_adj = get_road_adj_phase(relation)
             data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
             with open(graphwn_dataset, 'wb') as f:
                 pkl.dump(data, f)
             N = data['adj_road'].shape[0]
-            # TODO: GraphWN_p takes more time to train
             state_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, INFER_DEVICE, state_model_dir)
             if not state_net.is_model():
                 state_net.train(data['train']['x'], data['train']['target'], data['val']['x'], data['val']['target'], EPOCHS) # TODO: 3 for debug
 
-    elif args.control == 'M-M':
+    elif control == 'M-M':
+        # MaxPressure control test
         agents = create_maxp_agents(world)
         env = create_env(world, agents)
         adj_matrix = get_road_adj(relation)
@@ -173,74 +178,79 @@ if __name__ == "__main__":
         maxp_execute(logger, env, agents, action_interval, state_inference_net, mask_pos, relation,
              mask_matrix, adj_matrix)
 
-    elif args.control == 'I-M':
-        agents = create_app1maxp_agents(world, mask_pos,agent=args.agent, device=DEVICE)
+    elif control == 'I-M':
+        agents = create_app1maxp_agents(world, mask_pos, agent_type, DEVICE)
         env = create_env(world, agents)
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
         state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-        app1maxp_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE,agent_name=args.agent)
+        app1maxp_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE, agent_type)
 
-    elif args.control == 'S-S-O':
-        agents = create_shared_agents(world, mask_pos,agent=args.agent, device=DEVICE)
+    elif control == 'S-S-O':
+        agents = create_shared_agents(world, mask_pos, agent_type, DEVICE)
         env = create_env(world, agents)
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-        if args.impute == 'sfm':
+        if imputation == 'sfm':
             state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-            app1_trans_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, SAVE_RATE,agent_name=args.agent)
-        elif args.impute == 'gwn':
-            dj_matrix, phase_adj = get_road_adj_phase(relation)
+            app1_trans_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, DEVICE, SAVE_RATE, agent_type, HISTORY_LENGTH)
+        elif imputation == 'gwn':
+            # TODO: clean gwn branch in next version
             data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
             with open(graphwn_dataset, 'rb') as f:
                 data = pkl.load(f)
             N = data['adj_road'].shape[0]
             state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
             state_inference_net.load_model()
-            app1_trans_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
+            app1_trans_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, DEVICE, SAVE_RATE, agent_type, t_history=HISTORY_LENGTH)
 
-    elif args.control == 'I-I':
-        agents = create_independent_agents(world,agent=args.agent, device=DEVICE)
+    elif control == 'I-I':
+        agents = create_independent_agents(world, agent_type, DEVICE)
         env = create_env(world, agents)
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-        app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
+        if imputation == 'sfm':
+            state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
+            app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, REWARD_TYPE, DEVICE, SAVE_RATE, agent_type)
+        else:
+            # TODO: check graphwn in next version
+            data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
+            with open(graphwn_dataset, 'rb') as f:
+                data = pkl.load(f)
+            N = data['adj_road'].shape[0]
+            state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
+            state_inference_net.load_model()
+            app2_conc_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, REWARD_TYPE, DEVICE, SAVE_RATE, agent_type)
 
-    elif args.control == 'S-S-A':
-        agents = create_shared_agents(world, [],agent=args.agent, device=DEVICE)
+    elif control == 'S-S-A':
+        agents = create_shared_agents(world, [], agent_type, DEVICE)
         env = create_env(world, agents)
         adj_matrix, phase_adj = get_road_adj_phase(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        # if args.impute == 'sfm':
-        #     state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-        #     app2_shared_train(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent)
-        if args.impute == 'sfm':
+        if imputation == 'sfm':
             state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-            dj_matrix, phase_adj = get_road_adj_phase(relation)
             data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
-            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
-        elif args.impute == 'gwn':
-            dj_matrix, phase_adj = get_road_adj_phase(relation)
+            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, REWARD_TYPE, DEVICE, SAVE_RATE, agent_type, HISTORY_LENGTH)
+        elif imputation == 'gwn':
+            # TODO: check graphwn in next version
             data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
             with open(graphwn_dataset, 'rb') as f:
                 data = pkl.load(f)
             N = data['adj_road'].shape[0]
             state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
             state_inference_net.load_model()
-            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE,agent_name=args.agent, t_history=HISTORY_LENGTH)
+            app2_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, REWARD_TYPE, DEVICE, SAVE_RATE, agent_type, HISTORY_LENGTH)
 
-
-    elif args.control == 'S-S-O-model_based':
-        agents = create_model_based_agents(world, mask_pos, device=DEVICE,agent=args.agent)
+    elif control == 'S-S-O-model_based':
+        agents = create_model_based_agents(world, mask_pos, DEVICE, agent_type)
         env = create_env(world, agents)
         adj_matrix = get_road_adj(relation)
         mask_matrix = get_mask_matrix(relation, mask_pos)
-        if args.impute == 'sfm':
+        if imputation == 'sfm':
             state_inference_net = SFM_predictor(mask_matrix, adj_matrix, 'select')
-            model_based_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE, agent_name=args.agent,t_history=HISTORY_LENGTH, update_times=10)
-        elif args.impute == 'gwn':
+            model_based_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, REWARD_TYPE, DEVICE, SAVE_RATE, agent_type, HISTORY_LENGTH, update_times=10)
+        elif imputation == 'gwn':
+            # TODO: check graphwn in next version
             dj_matrix, phase_adj = get_road_adj_phase(relation)
             data = generate_state_dataset(save_state_dataset, history_t=HISTORY_LENGTH, pattern='select')
             with open(graphwn_dataset, 'rb') as f:
@@ -248,4 +258,4 @@ if __name__ == "__main__":
             N = data['adj_road'].shape[0]
             state_inference_net = GraphWN_predictor(N, data['node_update'], adj_matrix, data['stats'], 11, 3, DEVICE, state_model_dir)
             state_inference_net.load_model()
-            model_based_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, reward_type=REWARD_TYPE, device=DEVICE, save_rate=SAVE_RATE, agent_name=args.agent,t_history=HISTORY_LENGTH, update_times=10)
+            model_based_shared_train_v2(logger, env, agents, episodes, action_interval, state_inference_net, mask_pos, relation, mask_matrix, adj_matrix, reward_model_dir, REWARD_TYPE, DEVICE, SAVE_RATE, agent_type, HISTORY_LENGTH, update_times=10)

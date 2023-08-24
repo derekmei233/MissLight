@@ -320,8 +320,8 @@ def naive_execute_hetero(logger, env, agents, e, best_att, information, action_i
 def maxp_execute(logger, env, agents, action_interval, inference_net, mask_pos, relation, mask_matrix, adj_matrix):
     env.eng.set_save_replay(True)
     name = logger.handlers[0].baseFilename
-    save_dir = name[name.index('\output_data'): name.index('\logging')]
-    env.eng.set_replay_file(os.path.join(save_dir, 'replay', "replay_0.txt"))
+    save_dir = Path(name[name.index('output_data'): name.index('logging')])
+    env.eng.set_replay_file(os.path.join(str(save_dir), 'replay', "-1.txt"))
     logger.info(f"Max Pressure - Max Pressure control")
     i = 0
     record = MSEMetric('state mse', mask_pos)
@@ -375,7 +375,6 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
         episodes_decision_num = 0
         while i < 3600:
             if i % action_interval == 0:
-                # TODO: implement other State inference model later
                 # SFM inference states
                 actions = []
                 for agent_id, agent in enumerate(agents):
@@ -407,6 +406,7 @@ def app1maxp_train(logger, env, agents, episode, action_interval, inference_net,
                 last_states = np.array(last_states, dtype=np.float32)
                 last_phases = np.array(last_phases, dtype=np.int32)
                 last_recovered,loss = inference_net.predict(last_states, last_phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
+                record.add(last_states, last_recovered)
             for agent_id, agent in enumerate(agents):
                 if total_decision_num > agent.learning_start and total_decision_num % agent.update_model_freq == agent.update_model_freq - 1:
                     agent.replay()
@@ -467,7 +467,7 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
             states = np.array(states, dtype=np.float32)
             phases = np.array(phases, dtype=np.int8)
             recovered,loss = inference_net.predict(states, phases, relation, mask_pos, mask_matrix, adj_matrix, 'select')
-
+            record.add(last_states, last_recovered)
     cur_mse = record.get_cur_result()
     record.update()
     att = env.eng.get_average_travel_time()
@@ -476,7 +476,6 @@ def app1maxp_execute(logger, env, agents, e, best_att, record, inference_net, ac
     logger.info("episode:{}, Test:{}".format(e, att))
     logger.info("episode:{}, MSETest:{}".format(e, cur_mse))
     logger.info(f'delay: {np.array(delay_list) / count}')
-    
     return best_att
 
 # I-M 
@@ -522,9 +521,6 @@ def app1maxp_train_hetero(logger, env, agents, episode, action_interval, state_i
                     i += 1
                     rewards_list.append(rewards)
                 rewards = np.mean(rewards_list, axis=0)
-
-                # cur_states = np.array(cur_states, dtype=np.float32)
-                # cur_phases = np.array(cur_phases, dtype=np.int8)
 
                 for agent_id, agent in enumerate(agents):
                     if agent.name == 'MaxPressureAgent':
@@ -583,7 +579,6 @@ def app1maxp_execute_hetero(logger, env, agents, e, best_att, record, state_infe
     delay_list = np.zeros([1, len(agents)])
     while i < 3600:
         if i % action_interval == 0:
-            # TODO: implement other State inference model later
             # SFM inference states
             actions = []
             delays = []
@@ -1361,7 +1356,7 @@ def model_based_shared_train(logger, env, agents, episode, action_interval, stat
             for ag in agents:
                 # only use experiences at observable intersections
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
-                    ag.replay_img(reward_inference_net, update_times, reward_type)
+                    ag.replay_img(reward_inference_net, update_times)
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
                     ag.update_target_network()
         cur_mse = record.get_cur_result()
@@ -1968,7 +1963,7 @@ def model_based_shared_train_v2(logger, env, agents, episode, action_interval, s
             for ag in agents:
                 # only use experiences at observable intersections
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_model_freq == ag.update_model_freq - 1:
-                    ag.replay_img(reward_inference_net, state_inference_net, update_times, relation, mask_pos)
+                    ag.replay_img(reward_inference_net, update_times)
                 if total_decision_num > ag.learning_start and total_decision_num % ag.update_target_model_freq == ag.update_target_model_freq - 1:
                     ag.update_target_network()
         cur_mse = record.get_cur_result()

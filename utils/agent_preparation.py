@@ -141,7 +141,7 @@ def create_frap_agents(world,mask_pos,time):
     return agents
 '''
 
-def create_app1maxp_agents(world, mask_pos,agent, device):
+def create_app1maxp_agents(world, mask_pos, agent, device):
     agents = []
     if (agent=='DQN'):
         New_Agent=IDQNAgent

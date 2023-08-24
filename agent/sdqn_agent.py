@@ -203,7 +203,7 @@ class SDQNAgent(RLAgent):
             ob_traj = batch_ob_traj[i]
             obs = torch.cat((last_states, last_phases), axis=1).float().to('cpu')
             rewards = torch.squeeze(reward_model.predict(obs), dim=1).to('cpu')
-            next_states = state_model.pred(last_states, ob_traj, relation, mask_pos)
+            next_states = state_model.predict(last_states, ob_traj, relation, mask_pos)
             next_obs = torch.cat((next_states, cur_phases), axis=1).float().to('cpu')
             out = self.target_model.forward(next_obs, train=False)
             target = rewards + self.gamma * torch.max(out, dim=1)[0]
