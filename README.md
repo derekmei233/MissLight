@@ -35,6 +35,9 @@ python run.py
 
 this repository is only for reproduce results in the paper, later version will be released soon based on LibSignal project with compacted and flexible formation.
 
-For your reference:
-Paper link:
+### For your reference
+Paper link:https://arxiv.org/abs/2304.10722
 
+LibSignal project: https://darl-libsignal.github.io
+
+Upcoming tutorial session of LibSignal project:  https://darl-libsignal.github.io/itsc2023.html. We would be more than happy to see you there.
