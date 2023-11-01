@@ -153,23 +153,56 @@ class FRAP_SH_Agent(RLAgent):
         self.inter_id = iid
         self.idx = idx
         self.trainable = trainable
-        self.sub_agents = 1
+        self.learnable = len(idx)
+        self.sub_agents = len(iid)
         self.name=self.__class__.__name__
 
         self.ob_generator = ob_generator
-        ob_length = [self.ob_generator[0].ob_length, self.action_space.n]
+        self.twelve_movements = ['N_L', 'N_T', 'N_R', 'E_L', 'E_T', 'E_R', 'S_L', 'S_T', 'S_R', 'W_L', 'W_T', 'W_R']
+        ob_length = [self.ob_generator[0][0].ob_length, self.action_space.n]
+
         self.ob_length = sum(ob_length)
 
+        self.inter_obj = []
+        self.directions = []
+        self.road_names = []
+        self.movements = []
         self.lane_names = []
-        [self.lane_names.extend(l) for l in self.ob_generator[0].lanes]
-        self.directions = self.ob_generator[0].directions
-        self.road_names = self.ob_generator[0].roads
-        self.movements = [self._orthogonal_mapping(rad) for rad in self.directions]
-        self.twelve_movements = ['N_L', 'N_T', 'N_R', 'E_L', 'E_T', 'E_R', 'S_L', 'S_T', 'S_R', 'W_L', 'W_T', 'W_R']
+        self.phase2movements = []
+        self.lane2movements = []
+        self.inter_info = []
+        self.linkage_movement = []
+        self.world = self.ob_generator[0][0].world
+        self.memory = [deque(maxlen=5000) for i in range(self.learnable)]  # number of samples
+        self.memory_with_history = deque(maxlen=5000)
+        for id in self.inter_id:
+            inter_info = \
+            [self.world.roadnet['intersections'][idx] for idx, i in enumerate(self.world.roadnet['intersections']) if
+            i['id'] == id][0]
+            self.inter_info.append(inter_info)
+            linkage_movement = {(i['startRoad'], i['endRoad']): i['type'] for i in inter_info['roadLinks']}
+            self.linkage_movement.append(linkage_movement)
+        # self.inter_id = self.world.intersection_ids[self.idx]
+        for id in self.inter_id:
+            self.inter_obj.append(self.world.id2intersection[id])
 
-        self.world = self.ob_generator[0].world
-        #self.inter_id = self.world.intersection_ids[self.idx]
-        self.inter_obj = self.world.id2intersection[self.inter_id]
+        for i in range(self.sub_agents):
+            lane_names = []
+            [lane_names.extend(l) for l in self.ob_generator[i][0].lanes]
+            directions = self.ob_generator[i][0].directions
+            road_names = self.ob_generator[i][0].roads
+            movements = [self._orthogonal_mapping(rad) for rad in directions]
+            self.lane_names.append(lane_names)
+            self.road_names.append(road_names)
+            self.directions.append(directions)
+            self.movements.append(movements)
+            phase2movements = self._phase_avail_movements(i)
+            self.phase2movements.append(phase2movements)
+            lane2movements = self._construct_lane2movement_mapping(i)
+            self.lane2movements.append(lane2movements)
+
+
+       # self.inter_obj = self.world.id2intersection[self.inter_id]
 
         self.phase = True
         self.one_hot = False
@@ -178,20 +211,18 @@ class FRAP_SH_Agent(RLAgent):
         self.one_hot = False
         assert self.one_hot is False
 
-        self.inter_info = \
-        [self.world.roadnet['intersections'][idx] for idx, i in enumerate(self.world.roadnet['intersections']) if
-         i['id'] == self.inter_id][0]
-        self.linkage_movement = {(i['startRoad'], i['endRoad']): i['type'] for i in self.inter_info['roadLinks']}
-        self.phase2movements = self._phase_avail_movements()
-        self.lane2movements = self._construct_lane2movement_mapping()
-        self.num_phases = self.phase2movements.shape[0]
-        self.num_actions = self.phase2movements.shape[0]
+        self.num_phases = self.phase2movements[0].shape[0]
+        self.num_actions = self.phase2movements[0].shape[0]
 
-        self.comp_mask = self.relation()
-        self.phase2movements = torch.tensor(self.phase2movements).to(torch.int64)
+        self.comp_mask = []
+        for i in range(self.sub_agents):
+            comp_mask = self.relation(i)
+            self.comp_mask.append(comp_mask)
+
+        for i in range(self.sub_agents):
+            self.phase2movements[i] = torch.tensor(self.phase2movements[i]).to(torch.int64)
+        #self.phase2movements = torch.tensor(self.phase2movements).to(torch.int64)
         self.dic_phase_expansion = None
-        self.memory = deque(maxlen=5000) # 5000
-        self.memory_with_history = deque(maxlen=5000)
 
         self.learning_start = 2000
         self.update_model_freq = 1
@@ -206,17 +237,16 @@ class FRAP_SH_Agent(RLAgent):
         self.device = device
 
         self.criterion = nn.MSELoss(reduction='mean')
-        self.model =q_model # self.build_shared_model()
-
-        self.target_model = target_q_model  # self.build_shared_model()
+        self.model = self._build_model() # self.build_shared_model()
+        self.target_model = self._build_model()  # self.build_shared_model()
         self.update_target_network()
         # self.optimizer = optimizer
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.learning_rate, eps=1e-7)
 
-    def _construct_lane2movement_mapping(self):
-        result = np.zeros([len(self.lane_names), len(self.twelve_movements)])
-        mapping = self.inter_info['roadLinks']
+    def _construct_lane2movement_mapping(self, id):
+        result = np.zeros([len(self.lane_names[id]), len(self.twelve_movements)])
+        mapping = self.inter_info[id]['roadLinks']
         for r_link in mapping:
             tp = r_link['type']
             if tp == 'turn_left':
@@ -234,8 +264,8 @@ class FRAP_SH_Agent(RLAgent):
                 raise ValueError
             for l_link in r_link['laneLinks']:
                 idx = l_link['startLaneIndex']
-                r_idx = self.lane_names.index(r_link['startRoad']+'_'+str(idx))
-                c_idx = self.twelve_movements.index(self.movements[r_idx] + '_'+turn)
+                r_idx = self.lane_names[id].index(r_link['startRoad']+'_'+str(idx))
+                c_idx = self.twelve_movements.index(self.movements[id][r_idx] + '_'+turn)
                 result[r_idx, c_idx] = 1
         return result
 
@@ -252,16 +282,17 @@ class FRAP_SH_Agent(RLAgent):
             raise ValueError
 
 
-    def _phase_avail_movements(self):
+    def _phase_avail_movements(self, idx):
         # no yellow phase
+        #print(self.twelve_movements)
         result = np.zeros([self.action_space.n, len(self.twelve_movements)])
         for p in range(self.action_space.n):
-            avail_road_links_id = self.inter_obj.phase_available_roadlinks[p]
+            avail_road_links_id = self.inter_obj[idx].phase_available_roadlinks[p]
             for l in avail_road_links_id:
-                linkage = self.inter_obj.roadlinks[l]
+                linkage = self.inter_obj[idx].roadlinks[l]
                 start = linkage[0]
                 end = linkage[1]
-                tp = self.linkage_movement[(start, end)]
+                tp = self.linkage_movement[idx][(start, end)]
                 if tp == 'turn_left':
                     #  only work for atlanta now, remove U-turn
                     start_r = start.split('#')[0].replace('-', '')
@@ -273,12 +304,12 @@ class FRAP_SH_Agent(RLAgent):
                     turn = 'T'
                 elif tp == 'turn_right':
                     turn = 'R'
-                d = self.movements[self.road_names.index(start)]
+                d = self.movements[idx][self.road_names[idx].index(start)]
                 direction = self.twelve_movements.index(d + "_" + turn)
                 result[p, direction] = 1
         return result
 
-    def relation(self):
+    def relation(self, idx):
         '''
         relation
         Get the phase competition relation between traffic movements.
@@ -288,12 +319,13 @@ class FRAP_SH_Agent(RLAgent):
         '''
         comp_mask = []
         # remove connection at all phase, then compute if there is a same connection here
-        removed_phase2movements = deepcopy(self.phase2movements)
-        removed_phase2movements[:, np.sum(self.phase2movements, axis=0) == self.phase2movements.shape[0]] = 0
-        for i in range(self.phase2movements.shape[0]):
-            zeros = np.zeros(self.phase2movements.shape[0] - 1, dtype=np.int)
+        removed_phase2movements = deepcopy(self.phase2movements[idx])
+        #print(self.phase2movements[idx])
+        removed_phase2movements[:, np.sum(self.phase2movements[idx], axis=0) == self.phase2movements[idx].shape[0]] = 0
+        for i in range(self.phase2movements[idx].shape[0]):
+            zeros = np.zeros(self.phase2movements[idx].shape[0] - 1, dtype=np.int)
             cnt = 0
-            for j in range(self.phase2movements.shape[0]):
+            for j in range(self.phase2movements[idx].shape[0]):
                 if i == j: continue
 
                 pair_a = removed_phase2movements[i]
@@ -304,9 +336,9 @@ class FRAP_SH_Agent(RLAgent):
         comp_mask = torch.from_numpy(np.asarray(comp_mask))
         return comp_mask
 
-    def choose(self, ob, phase):
+    def choose(self, ob, phase, relation=None):
         if np.random.rand() <= self.epsilon:
-            return self.action_space.sample()
+            return self.sample()
         return self.get_action(ob, phase)
 
     def get_ob(self):
@@ -317,33 +349,39 @@ class FRAP_SH_Agent(RLAgent):
         :param: None
         :return x_obs: observation generated by ob_generator
         '''
-        tmp = self.ob_generator[0].generate()
-        return [np.dot(tmp, self.lane2movements), np.array(self.ob_generator[1].generate())]
+
+
+        obs = tuple([np.dot(self.ob_generator[i][0].generate(), self.lane2movements[i]), np.array(self.ob_generator[i][1].generate())]
+                        for i in range(self.sub_agents))
+        return obs
     
     def get_orig_ob(self):
-        return self.ob_generator[0].generate()
+        obs = tuple([self.ob_generator[i][0].generate()]
+                    for i in range(self.sub_agents))
+        return obs
 
     def get_delay(self):
-        return np.mean(self.ob_generator[2].generate())
-    
+        obs = np.array(list([np.mean(self.ob_generator[i][2].generate())] for i in range(self.sub_agents))).squeeze()
+        return obs
+
     def get_movement(self, phase):
-        movement = self.phase2movements[phase]
-        return np.array(movement)
+        movement = tuple([np.array(self.phase2movements[phase[i]]) for i in range(self.sub_agents)])
+        return movement
 
     def get_movement_state(self, states):
         return np.dot(states, self.lane2movements)
 
     def get_reward(self):
-        reward = self.reward_generator.generate()
-        if len(reward) == 1:
-            return reward[0]
-        else:
-            return reward
+        rewards = tuple([self.reward_generator[i].generate() for i in range(self.sub_agents)])
+        return rewards
 
     def get_phase(self):
         phase = []
-        phase.append(self.ob_generator[1].generate())
-        phase = (np.concatenate(phase)).astype(np.int8)
+        for i in range(self.sub_agents):
+            new_phase = []
+            new_phase.append(self.ob_generator[i][1].generate())
+            new_phase = (np.concatenate(new_phase)).astype(np.int8)
+            phase.append(new_phase)
         return phase
 
     def get_action(self, ob, phase, test=True):
@@ -356,47 +394,38 @@ class FRAP_SH_Agent(RLAgent):
         :param test: boolean, decide whether is test process
         :return: action that has the highest score
         '''
-        if self.phase2movements.shape[0] == 1:
-            return np.array(0)
         if not test:
             if np.random.rand() <= self.epsilon:
-                return self.action_space.sample()
-        feature = np.concatenate([phase.reshape(1,-1), ob.reshape(1,-1)], axis=1)
-        observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
-        actions = self.model(observation, self.phase2movements, self.action_space.n, self.comp_mask, train=False)
-        actions = actions.to('cpu').clone().detach().numpy()
-        return np.argmax(actions, axis=1).squeeze()
+                return self.sample()
+        actions = []
+        for idx in range(self.sub_agents):
+            feature = np.concatenate([phase[idx].reshape(1,-1), ob[idx].reshape(1,-1)], axis=1)
+            observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
+            action = self.model(observation, self.phase2movements[idx], self.action_space.n, self.comp_mask[idx], train=False)
+            action = action.to('cpu').clone().detach().numpy()
+            actions.append(np.argmax(action, axis=1).squeeze())
+        return actions
 
     def _reshape_ob(self, ob):
         return np.reshape(ob, (1, -1))
 
+
     def update_target_network(self):
         weights = self.model.state_dict()
+        #print(weights.keys())
         self.target_model.load_state_dict(weights)
 
-    def remember(self, ob, action, reward, next_ob):
-        self.memory.append((ob[0].reshape(1,-1), ob[1], action, reward, next_ob[0].reshape(1,-1), next_ob[1]))
+    def remember(self, ob, action, reward, next_ob, idx):
+        self.memory[self.idx.index(idx)].append((ob, action, reward, next_ob))
 
     '''
     def get_movement(self, phase):
         movement = self.phase2movements[phase]
         return np.array(movement)
     '''
-    def get_reward(self):
-        reward = self.reward_generator.generate()
-        if len(reward) == 1:
-            return reward[0]
-        else:
-            return reward
-
-    def get_phase(self):
-        phase = []
-        phase.append(self.ob_generator[1].generate())
-        phase = (np.concatenate(phase)).astype(np.int8)
-        return phase
 
     def sample(self):
-        return self.action_space.sample()
+        return [self.action_space.sample() for _ in range(self.sub_agents)]
 
     def _batchwise(self, samples):
         '''
