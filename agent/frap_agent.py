@@ -46,6 +46,7 @@ class FRAP_DQNAgent(RLAgent):
         self.action_space = action_space
         self.ob_generator = ob_generator
         self.world = self.ob_generator[0].world
+        #print(self.idx)
         self.inter_id = self.world.intersection_ids[self.idx]
         self.inter_obj = self.world.id2intersection[self.inter_id]
 
@@ -219,7 +220,7 @@ class FRAP_DQNAgent(RLAgent):
         if self.phase2movements.shape[0] == 1:
             return np.array(0)
 
-        feature = np.concatenate([phase.reshape(1,-1), ob.reshape(1,-1)], axis=1)
+        feature = np.concatenate([phase[self.idx].reshape(1,-1), ob[self.idx].reshape(1,-1)], axis=1)
         observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
         actions = self.model(observation, train=False)
         actions = actions.to('cpu').clone().detach().numpy()
@@ -241,6 +242,7 @@ class FRAP_DQNAgent(RLAgent):
 
     def update_target_network(self):
         weights = self.model.state_dict()
+        #print(weights['param_group'])
         self.target_model.load_state_dict(weights)
 
     def remember(self, ob, action, reward, next_ob):
@@ -330,7 +332,7 @@ class FRAP_move(nn.Module):
     def __init__(self, output_shape, phase2movements, competition_mask, device):
         super(FRAP_move, self).__init__()
         self.oshape = output_shape
-        self.device =device
+        self.device = device
         self.phase2movements = phase2movements.to(self.device)
         self.comp_mask = competition_mask.to(self.device)
         self.demand_shape = 1   # Allows more than just queue to be used
@@ -385,7 +387,7 @@ class FRAP_move(nn.Module):
 
         # Phase competition mask
         competition_mask = self.comp_mask.repeat((batch_size, 1, 1)) # [B, 3, 2]
-        relations = F.relu(self.relation_embedding(competition_mask)) # [B, 3, 2, 4] ? 
+        relations = F.relu(self.relation_embedding(competition_mask.long())) # [B, 3, 2, 4] ?
         relations = relations.permute(0, 3, 1, 2)  # [B, 4, 3, 2]
         relations = F.relu(self.relation_conv(relations))  # [B, 20, 3, 2]
 
