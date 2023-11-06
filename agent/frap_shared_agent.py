@@ -152,7 +152,7 @@ class FRAP_SH_Agent(RLAgent):
         all or observable intersections, we use it to process all information but only give it accessibility to observable ones
     """
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, trainable, q_model, target_q_model,optimizer,
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, obs_pos, q_model, target_q_model,optimizer,
                  device):
         super(FRAP_SH_Agent,self).__init__(action_space, ob_generator, reward_generator)
 
