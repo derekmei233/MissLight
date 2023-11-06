@@ -53,10 +53,10 @@ class SDQNAgent(RLAgent):
         all or observable intersections, we use it to process all information but only give it accessibility to observable ones
     """
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, q_model, target_q_model, optimizer, device):
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, obs_pos, q_model, target_q_model, optimizer, device):
         super().__init__(action_space, ob_generator, reward_generator)
         self.iid = iid
-        self.idx = idx # learnable index
+        self.idx = obs_pos # learnable index
         self.sub_agents = len(iid)
         self.DEVICE = device
 
