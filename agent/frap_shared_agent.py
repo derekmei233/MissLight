@@ -157,9 +157,9 @@ class FRAP_SH_Agent(RLAgent):
         super(FRAP_SH_Agent,self).__init__(action_space, ob_generator, reward_generator)
 
         self.inter_id = iid
-        self.idx = idx
+        self.idx = obs_pos  # learnable index
         self.trainable = True
-        self.learnable = len(idx)
+        self.learnable = len(self.idx)
         self.sub_agents = len(iid)
         self.name = self.__class__.__name__
 
