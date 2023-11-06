@@ -43,6 +43,11 @@ class FRAP_move(nn.Module):
 
         self.hidden_layer = nn.Conv2d(20, 20, kernel_size=(1, 1))
         self.before_merge = nn.Conv2d(20, 1, kernel_size=(1, 1))
+        self.Q_Net = nn.Sequential(
+            nn.Linear(8, 8),
+            nn.ReLU(),
+        )
+
 
     def _forward(self, states, phase2movements, oshape, comp_mask):
         '''
@@ -68,7 +73,7 @@ class FRAP_move(nn.Module):
         #     extended_acts = torch.stack(connectivity)
         # phase_embeds = torch.sigmoid(self.p(extended_acts))
 
-        connectivity = phase2movements[acts]
+        connectivity = phase2movements[acts].long()
         phase_embeds = torch.sigmoid(self.p(connectivity))  # [B, 4, 3, 12]
 
         # if num_movements == 12:
@@ -131,6 +136,7 @@ class FRAP_move(nn.Module):
         # Phase score
         combine_features = torch.reshape(combine_features, (batch_size, oshape, oshape - 1))  # [B, 3, 2]
         q_values = (lambda x: torch.sum(x, dim=2))(combine_features)  # (B, 3)
+        #q_values = self.Q_Net(q_values)
         return q_values
 
     def forward(self, states, phase2movements, oshape, comp_mask, train=True):
@@ -146,16 +152,16 @@ class FRAP_SH_Agent(RLAgent):
         all or observable intersections, we use it to process all information but only give it accessibility to observable ones
     """
 
-    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, trainable, q_model, target_q_model,
+    def __init__(self, action_space, ob_generator, reward_generator, iid, idx, trainable, q_model, target_q_model,optimizer,
                  device):
         super(FRAP_SH_Agent,self).__init__(action_space, ob_generator, reward_generator)
 
         self.inter_id = iid
         self.idx = idx
-        self.trainable = trainable
+        self.trainable = True
         self.learnable = len(idx)
         self.sub_agents = len(iid)
-        self.name=self.__class__.__name__
+        self.name = self.__class__.__name__
 
         self.ob_generator = ob_generator
         self.twelve_movements = ['N_L', 'N_T', 'N_R', 'E_L', 'E_T', 'E_R', 'S_L', 'S_T', 'S_R', 'W_L', 'W_T', 'W_R']
@@ -173,7 +179,7 @@ class FRAP_SH_Agent(RLAgent):
         self.inter_info = []
         self.linkage_movement = []
         self.world = self.ob_generator[0][0].world
-        self.memory = [deque(maxlen=5000) for i in range(self.learnable)]  # number of samples
+        self.memory = [deque(maxlen=5000) for _ in range(self.learnable)]  # number of samples
         self.memory_with_history = deque(maxlen=5000)
         for id in self.inter_id:
             inter_info = \
@@ -218,31 +224,32 @@ class FRAP_SH_Agent(RLAgent):
         for i in range(self.sub_agents):
             comp_mask = self.relation(i)
             self.comp_mask.append(comp_mask)
+            self.phase2movements[i] = torch.from_numpy(self.phase2movements[i]).long()
 
-        for i in range(self.sub_agents):
-            self.phase2movements[i] = torch.tensor(self.phase2movements[i]).to(torch.int64)
-        #self.phase2movements = torch.tensor(self.phase2movements).to(torch.int64)
+        #for i in range(self.sub_agents):
+            #self.phase2movements[i] = torch.from_numpy(self.phase2movements[i]).long()
+
         self.dic_phase_expansion = None
 
-        self.learning_start = 2000
+        self.learning_start = 1000
         self.update_model_freq = 1
-        self.update_target_model_freq = 20
-        self.grad_clip=0.5 # 0.5
+        self.update_target_model_freq = 10
+        self.grad_clip = 0.5 # 0.5
         self.gamma = 0.98  # 0.98
         self.epsilon = 0.5  # 0.5
-        self.epsilon_min = 0.1
+        self.epsilon_min = 0.01
         self.epsilon_decay = 0.999 # 0.999
         self.learning_rate = 0.001 # 0.001
         self.batch_size = 64
         self.device = device
 
         self.criterion = nn.MSELoss(reduction='mean')
-        self.model = self._build_model() # self.build_shared_model()
-        self.target_model = self._build_model()  # self.build_shared_model()
+        self.model = q_model # self.build_shared_model()
+        self.target_model = target_q_model  # self.build_shared_model()
         self.update_target_network()
-        # self.optimizer = optimizer
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.learning_rate, eps=1e-7)
+        self.optimizer = optimizer
+        #self.optimizer = torch.optim.Adam(
+            #self.model.parameters(), lr=self.learning_rate, eps=1e-7)
 
     def _construct_lane2movement_mapping(self, id):
         result = np.zeros([len(self.lane_names[id]), len(self.twelve_movements)])
@@ -372,7 +379,7 @@ class FRAP_SH_Agent(RLAgent):
         return np.dot(states, self.lane2movements)
 
     def get_reward(self):
-        rewards = tuple([self.reward_generator[i].generate() for i in range(self.sub_agents)])
+        rewards = tuple([self.reward_generator[i].generate()*self.num_phases for i in range(self.sub_agents)])
         return rewards
 
     def get_phase(self):
@@ -401,7 +408,7 @@ class FRAP_SH_Agent(RLAgent):
         for idx in range(self.sub_agents):
             feature = np.concatenate([phase[idx].reshape(1,-1), ob[idx].reshape(1,-1)], axis=1)
             observation = torch.tensor(feature, dtype=torch.float32).to(self.device)
-            action = self.model(observation, self.phase2movements[idx], self.action_space.n, self.comp_mask[idx], train=False)
+            action = self.model(observation, self.phase2movements[idx], self.action_space.n, self.comp_mask[idx].long(), train=False)
             action = action.to('cpu').clone().detach().numpy()
             actions.append(np.argmax(action, axis=1).squeeze())
         return actions
@@ -416,7 +423,7 @@ class FRAP_SH_Agent(RLAgent):
         self.target_model.load_state_dict(weights)
 
     def remember(self, ob, action, reward, next_ob, idx):
-        self.memory[self.idx.index(idx)].append((ob, action, reward, next_ob))
+        self.memory[self.idx.index(idx)].append((ob[0].reshape(1,-1), ob[1], action, reward, next_ob[0].reshape(1,-1), next_ob[1]))
 
     '''
     def get_movement(self, phase):
@@ -446,7 +453,9 @@ class FRAP_SH_Agent(RLAgent):
         obs_tp = np.concatenate(obs_tp) # (batch,lane_num)
 
         phase_t = np.concatenate([item[1].reshape(1,-1) for item in samples]) # (batch, 1)
+        #phase_t = np.concatenate([item[1] for item in samples])
         phase_tp = np.concatenate([item[5].reshape(1,-1) for item in samples])
+        #phase_tp = np.concatenate([item[5] for item in samples])
         feature_t = np.concatenate([phase_t, obs_t], axis=1) # (batch,ob_length)
         feature_tp = np.concatenate([phase_tp, obs_tp], axis=1)
         # (batch_size, ob_length)
@@ -467,22 +476,22 @@ class FRAP_SH_Agent(RLAgent):
         :param: None
         :return: value of loss
         '''
-        if len(self.memory) < self.batch_size:
+        if len(self.memory[0]) < self.batch_size:  ####出大问题！
             return
         if self.trainable == False:
             return
         if self.action_space.n == 1:
             return np.array(0)
         #print(f'train on {self.inter_id}')
-        samples = random.sample(self.memory, self.batch_size)
+        samples = self._sample(self.batch_size)
         b_t, b_tp, rewards, actions = self._batchwise(samples)
-        out = self.target_model(b_tp, self.phase2movements, self.action_space.n, self.comp_mask, train=False) # (batch_size,num_actions)
+        out = self.target_model(b_tp, self.phase2movements[0], self.action_space.n, self.comp_mask[0], train=False) # (batch_size,num_actions)
         target = rewards + self.gamma * torch.max(out, dim=1)[0] # (batch_size)
-        target_f = self.model(b_t, self.phase2movements, self.action_space.n, self.comp_mask, train=False) # (batch_size,num_actions)
+        target_f = self.model(b_t, self.phase2movements[0], self.action_space.n, self.comp_mask[0], train=False) # (batch_size,num_actions)
         for i, action in enumerate(actions):
             target_f[i][action] = target[i]
 
-        loss = self.criterion(self.model(b_t, self.phase2movements, self.action_space.n, self.comp_mask, train=True), target_f)
+        loss = self.criterion(self.model(b_t, self.phase2movements[0], self.action_space.n, self.comp_mask[0], train=True), target_f)
         self.optimizer.zero_grad()
         loss.backward()
         clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -490,6 +499,13 @@ class FRAP_SH_Agent(RLAgent):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
         return loss.to('cpu').clone().detach().numpy()
+
+    def _sample(self, batch_size):
+        mini_batch = []
+        for i in range(self.learnable):
+            mini_batch.extend(random.sample(self.memory[i], batch_size))
+        random.shuffle(mini_batch)
+        return mini_batch
 
     def _build_model(self):
         # Neural Net for Deep-Q learning Model
